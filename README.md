@@ -18,13 +18,24 @@ The generator parses Markdown files with slide separators and intelligently maps
 ```
 2026 ILTCI/
 ├── src/                          # Python source code
-│   └── generate_pptx.py         # Main presentation generator script
+│   ├── generate_pptx.py         # Main presentation generator script (thin wrapper)
+│   └── iltci_pptx/              # Core package
+│       ├── __init__.py          # Package marker
+│       ├── cli.py               # Command-line interface
+│       ├── config.py            # Configuration management
+│       ├── generator.py         # Presentation orchestration
+│       ├── markdown_parser.py   # Markdown parsing logic
+│       ├── slide_builders.py    # Slide construction
+│       ├── rich_text.py         # Text formatting
+│       ├── html_media.py        # HTML and image extraction
+│       └── images.py            # Image handling
 ├── content/                      # Markdown content files
 │   ├── slides.md                # Slide content in Markdown format
 │   └── notes.md                 # Speaker notes (optional)
 ├── templates/                    # PowerPoint templates
 │   └── template.pptx            # Base presentation template with styling
 ├── assets/                       # Static resources
+│   ├── template-config.yaml     # Template styling configuration
 │   ├── iltci-theme.css          # Theme styling reference
 │   ├── title_slide_bg_image1.png
 │   └── title_slide_bg_image2.png
@@ -34,7 +45,7 @@ The generator parses Markdown files with slide separators and intelligently maps
 │   └── template_styles_extracted.md  # Template style documentation
 ├── output/                       # Generated presentations
 │   └── presentation.pptx        # Default output location
-├── config.yaml                   # Configuration file
+├── config.yaml                   # Main configuration file
 ├── pyproject.toml               # Project dependencies
 └── README.md                    # This file
 ```
@@ -84,12 +95,20 @@ pip install python-pptx>=0.6.21 pyyaml>=6.0
 
 ## Configuration
 
-The generator uses [`config.yaml`](config.yaml) to manage paths and settings:
+The generator uses a two-tier configuration system:
+
+1. **[`config.yaml`](config.yaml)** - Main configuration for paths and high-level settings
+2. **[`assets/template-config.yaml`](assets/template-config.yaml)** - Template-specific styling and formatting
+
+### Main Configuration (`config.yaml`)
 
 ```yaml
 paths:
   # Template PowerPoint file
   template: "templates/template.pptx"
+  
+  # Template configuration (styling, layout, fonts)
+  template_config: "assets/template-config.yaml"
   
   # Content source files
   content: "content/slides.md"
@@ -104,16 +123,65 @@ paths:
 settings:
   # Overwrite existing output file
   overwrite_output: true
+  
+  # Logging configuration
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
 ```
 
-### Configuration Options
+#### Main Configuration Options
 
 - **`paths.template`**: Path to your PowerPoint template file
+- **`paths.template_config`**: Path to template styling configuration
 - **`paths.content`**: Path to your Markdown content file
 - **`paths.notes`**: Path to speaker notes (optional)
 - **`paths.output`**: Where the generated presentation will be saved
 - **`paths.assets_dir`**: Directory containing images and other assets
 - **`settings.overwrite_output`**: Whether to overwrite existing output files
+- **`settings.logging.level`**: Logging verbosity (DEBUG, INFO, WARNING, ERROR)
+
+### Template Configuration (`assets/template-config.yaml`)
+
+The template configuration file contains all styling parameters, making it easy to customize the look and feel of your presentations:
+
+```yaml
+# Slide layout indices
+layouts:
+  title_slide_index: 0
+  content_slide_index: 1
+
+# Font sizing (in points)
+fonts:
+  title_slide:
+    section_name: 40
+    title: 50
+    subtitle: 24
+  content_slide:
+    title: 32
+    h2_header: 32
+    h3_header: 24
+    h4_header: 20
+    h5_header: 18
+    body_text: 24
+    bullet: 24
+    numbered: 24
+
+# Image layout (in inches)
+image_layout:
+  default_height: 3.0
+  default_width: 2.5
+  gap_between: 0.5
+  top_position: 4.0
+```
+
+All previously hardcoded values for fonts, spacing, and layout are now configurable through [`assets/template-config.yaml`](assets/template-config.yaml). This allows you to:
+
+- Customize font sizes for different heading levels
+- Adjust image positioning and sizing
+- Modify slide layout behavior
+- Change bullet and numbering styles
+
+To customize styling, simply edit the values in [`assets/template-config.yaml`](assets/template-config.yaml) - no code changes required.
 
 ## Usage
 
