@@ -203,7 +203,7 @@ section code {
 
 /* Footer with session title (left) and slide number (right) */
 section:not(.title)::after {
-  content: 'Session Title – Change in Slide Master View    |    ' attr(data-page-number);
+  content: 'AI in Actuarial and Finance    |    ' attr(data-page-number);
   position: absolute;
   bottom: 20px;
   left: 70px;
