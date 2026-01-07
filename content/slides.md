@@ -8,8 +8,6 @@ theme: iltci
 
 <!-- _class: title -->
 
-### Actuarial & Finance
-
 # AI for Actuaries
 
 ## Chris Nienart
@@ -205,6 +203,10 @@ Costs (and revenue) are massively reduced
 
 # Questions?
 
-## Thank you
+**About this presentation**
+This presentation is available on [GitHub](https://github.com/chrisnienart/2026-ILTCI/).
+- It was created with the tools described in the presentation itself: markdown, git, and AI Agents. 
 
-### Chris Nienart
+**Thank you**
+Chris Nienart
+
