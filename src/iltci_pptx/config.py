@@ -36,20 +36,103 @@ class Config:
             config_path: Path to main configuration file
         """
         self.config_path = Path(config_path)
-        self._config = self._load_configuration()
-        self._setup_logging()
-    
-    def _load_configuration(self) -> Dict[str, Any]:
-        """Load and merge both configuration files."""
-        # Load main config
+        config_dir = self.config_path.parent
+        
+        # Load main config first to get paths
         main_config = load_yaml_file(self.config_path)
         
-        # Load template config
-        template_config_path = Path(main_config['paths']['template_config'])
-        template_config = load_yaml_file(template_config_path)
+        # Set up project_root from paths.project_root if present
+        paths_config = main_config.get('paths', {})
+        if 'project_root' in paths_config:
+            self.project_root = (config_dir / paths_config['project_root']).resolve()
+        else:
+            self.project_root = Path.cwd()
         
-        # Merge configurations (template config is the base, main config overlays)
-        merged = merge_dicts(template_config, main_config)
+        # Store paths for resolution
+        self._paths = paths_config
+        
+        # Load and merge configuration
+        self._config = self._load_configuration(main_config)
+        self._setup_logging()
+    
+    @classmethod
+    def from_dict(cls, main_config: Dict[str, Any], config_dir: Path) -> "Config":
+        """Create Config instance from dictionary (for Streamlit integration).
+        
+        Args:
+            main_config: Configuration dictionary (already loaded)
+            config_dir: Directory containing the config file (for path resolution)
+            
+        Returns:
+            Configured Config instance
+        """
+        config = cls.__new__(cls)
+        config.config_path = config_dir / "config.yaml"  # Virtual path
+        
+        # Set up project_root from paths.project_root if present
+        paths_config = main_config.get('paths', {})
+        if 'project_root' in paths_config:
+            config.project_root = (config_dir / paths_config['project_root']).resolve()
+        else:
+            config.project_root = Path.cwd()
+        
+        # Store paths for resolution
+        config._paths = paths_config
+        
+        # Load and merge with template config if available
+        template_config_path = config._resolve_path_value(paths_config.get('template_config', ''))
+        if template_config_path and template_config_path.exists():
+            template_config = load_yaml_file(template_config_path)
+            config._config = merge_dicts(template_config, main_config)
+        else:
+            config._config = main_config.copy()
+        
+        # Update internal paths reference after merge
+        config._paths = config._config.get('paths', {})
+        
+        config._setup_logging()
+        config.validate_paths()
+        return config
+    
+    def _resolve_path_value(self, value: str) -> Path:
+        """Resolve a path value relative to project_root if not absolute.
+        
+        Args:
+            value: Path string to resolve
+            
+        Returns:
+            Resolved Path object
+        """
+        if not value:
+            return Path()
+        p = Path(value)
+        if not p.is_absolute():
+            return self.project_root / p
+        return p.resolve()
+    
+    def _load_configuration(self, main_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Load and merge both configuration files.
+        
+        Args:
+            main_config: Already loaded main configuration dictionary
+            
+        Returns:
+            Merged configuration dictionary
+        """
+        # Load template config using resolved path
+        template_config_path = self._resolve_path_value(
+            main_config.get('paths', {}).get('template_config', '')
+        )
+        
+        if template_config_path and template_config_path.exists():
+            template_config = load_yaml_file(template_config_path)
+            # Merge configurations (template config is the base, main config overlays)
+            merged = merge_dicts(template_config, main_config)
+        else:
+            merged = main_config.copy()
+        
+        # Update internal paths reference after merge
+        self._paths = merged.get('paths', {})
         
         logging.debug(f"Loaded main config from: {self.config_path}")
         logging.debug(f"Loaded template config from: {template_config_path}")
@@ -88,28 +171,31 @@ class Config:
         return value
     
     def get_path(self, key: str) -> Path:
-        """Get a path from configuration, ensuring it's a Path object.
+        """Get a path from configuration, resolved relative to project_root.
         
         Args:
             key: Path key in config (e.g., 'template', 'content')
             
         Returns:
-            Path object
+            Resolved Path object
         """
-        path_str = self.get(f'paths.{key}')
+        path_str = self._paths.get(key)
         if path_str is None:
             raise ValueError(f"Path '{key}' not found in configuration")
-        return Path(path_str)
+        return self._resolve_path_value(path_str)
     
     def validate_paths(self):
-        """Validate that required paths exist."""
+        """Validate that required paths exist using resolved paths."""
         required_paths = ['template', 'content']
         missing = []
         
         for path_key in required_paths:
-            path = self.get_path(path_key)
-            if not path.exists():
-                missing.append(f"{path_key}: {path}")
+            try:
+                path = self.get_path(path_key)
+                if not path.exists():
+                    missing.append(f"{path_key}: {path}")
+            except ValueError:
+                missing.append(f"{path_key}: not configured")
         
         if missing:
             raise FileNotFoundError(

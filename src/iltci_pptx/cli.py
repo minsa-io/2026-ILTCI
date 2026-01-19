@@ -21,8 +21,8 @@ def parse_arguments() -> argparse.Namespace:
     # Config file path
     parser.add_argument(
         '--config',
-        default='config.yaml',
-        help='Path to configuration file (default: config.yaml)'
+        default='app/config.yaml',
+        help='Path to config YAML (default: app/config.yaml)'
     )
     
     # Path overrides (note: not implemented yet, would require CLI override logic in Config)
