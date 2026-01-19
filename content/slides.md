@@ -8,11 +8,13 @@ theme: iltci
 
 <!-- _class: title -->
 
-# AI for Actuaries
+# AI in Actuarial and Finance
 
-## Chris Nienart
+## Case Studies and the Road Ahead
 
-### March 9, 2026
+Chris Nienart
+
+March 9, 2026
 
 ---
 
