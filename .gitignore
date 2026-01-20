@@ -77,4 +77,6 @@ Thumbs.db
 *.orig
 
 # Project-specific
+archive/
 plans/
+assets/edits/
