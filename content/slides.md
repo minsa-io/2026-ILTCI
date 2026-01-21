@@ -219,7 +219,7 @@ Take a picture of a text menu and get a new menu with images for each dish.
 
 - The project is available on [GitHub](https://github.com/chrisnienart/2026-ILTCI/). As an MIT licensed project, you are free to use it however you would like. 
 
-- The project comes with boilerplate code and a Streamlit app so that you can use to generate your own presentations. 
+- The project comes with boilerplate code and a [Streamlit app](https://pptx-iltci.streamlit.app/) so that you can use to generate your own presentations. 
 
 Thank you
 Chris Nienart
