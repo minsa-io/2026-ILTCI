@@ -17,6 +17,10 @@ The generator parses Markdown files with slide separators and intelligently maps
 
 ```
 2026 ILTCI/
+├── app/                          # Streamlit UI + default configuration
+│   ├── app.py                    # Streamlit app entrypoint
+│   ├── config.yaml               # Default configuration (CLI/app)
+│   └── README.md                 # App-specific usage (how to run the UI)
 ├── src/                          # Python source code
 │   ├── generate_pptx.py         # Main presentation generator script (thin wrapper)
 │   └── iltci_pptx/              # Core package
@@ -45,7 +49,6 @@ The generator parses Markdown files with slide separators and intelligently maps
 │   └── template_styles_extracted.md  # Template style documentation
 ├── output/                       # Generated presentations
 │   └── presentation.pptx        # Default output location
-├── config.yaml                   # Main configuration file
 ├── pyproject.toml               # Project dependencies
 └── README.md                    # This file
 ```
@@ -97,10 +100,10 @@ pip install python-pptx>=0.6.21 pyyaml>=6.0
 
 The generator uses a two-tier configuration system:
 
-1. **[`config.yaml`](config.yaml)** - Main configuration for paths and high-level settings
+1. **[`app/config.yaml`](app/config.yaml)** - Main configuration for paths and high-level settings
 2. **[`assets/template-config.yaml`](assets/template-config.yaml)** - Template-specific styling and formatting
 
-### Main Configuration (`config.yaml`)
+### Main Configuration (`app/config.yaml`)
 
 ```yaml
 paths:
@@ -219,10 +222,18 @@ python src/generate_pptx.py \
 
 ### Command-Line Options
 
-- `--config PATH`: Path to configuration file (default: `config.yaml`)
+- `--config PATH`: Path to configuration file (default: `app/config.yaml`)
 - `--template PATH`: Path to PowerPoint template (overrides config)
 - `--content PATH`: Path to Markdown content file (overrides config)
 - `--output PATH`: Path to output PowerPoint file (overrides config)
+
+### Streamlit App (Web UI)
+
+![Streamlit app](assets/streamlit-app.png)
+
+This repository also includes a Streamlit-based UI in [`app/`](app) for interactively configuring and generating presentations.
+
+For how to run the app locally, see [`app/README.md`](app/README.md).
 
 ### Markdown Content Format
 
@@ -308,10 +319,10 @@ Additional documentation is available in the [`docs/`](docs) directory:
 ### Common Issues
 
 **Issue**: `FileNotFoundError: Configuration file not found`
-- **Solution**: Ensure [`config.yaml`](config.yaml) exists in the project root or specify the correct path with `--config`
+- **Solution**: Ensure [`app/config.yaml`](app/config.yaml) exists or specify the correct path with `--config`
 
 **Issue**: `Template file not found`
-- **Solution**: Verify the template path in [`config.yaml`](config.yaml) or provide the correct path with `--template`
+- **Solution**: Verify the template path in [`app/config.yaml`](app/config.yaml) or provide the correct path with `--template`
 
 **Issue**: `Content file not found`
 - **Solution**: Check that your Markdown file exists at the specified path
@@ -350,7 +361,8 @@ This project is part of the 2026 ILTCI presentation materials.
 For issues or questions:
 1. Check the documentation in the [`docs/`](docs) directory
 2. Review the example content in [`content/slides.md`](content/slides.md)
-3. Verify your configuration in [`config.yaml`](config.yaml)
+3. Verify your configuration in [`app/config.yaml`](app/config.yaml)
+
 
 ---
 
