@@ -1,7 +1,7 @@
 ---
 title: "AI for Actuaries"
 author: "Chris Nienart"
-date: "2026-03-09"
+date: "2026-03-10"
 marp: true
 theme: iltci
 template: templates/template.potx
@@ -17,7 +17,7 @@ layout: Title
 
 Chris Nienart
 
-March 9, 2026
+March 10, 2026
 
 ---
 
@@ -78,7 +78,7 @@ images:
 
 # New skills
 
-## Using with Agents
+## Using Agents
 - You will need to learn how to integrate LLMs directly into your workflow
 
 **Example: Kilo in VS Code**
