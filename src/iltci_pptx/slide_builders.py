@@ -309,6 +309,12 @@ def _populate_content_text_frame(text_frame, content: str, slide: 'Slide', confi
     numbering_type = config.get('bullets.numbering_type', 'arabicPeriod')
     spacer_size = config.get('fonts.content_slide.spacer', 12)  # Smaller font for spacer lines
     
+    # Get bold settings from config
+    h2_bold = config.get('formatting.h2_bold', True)
+    h3_bold = config.get('formatting.h3_bold', False)
+    h4_bold = config.get('formatting.h4_bold', False)
+    h5_bold = config.get('formatting.h5_bold', False)
+    
     # Parse content (bullets, numbered lists, etc.)
     for line in content.split('\n'):
         line_stripped = line.strip()
@@ -340,6 +346,8 @@ def _populate_content_text_frame(text_frame, content: str, slide: 'Slide', confi
             remove_bullet(p)
             for run in p.runs:
                 run.font.size = Pt(h5_size)
+                if h5_bold:
+                    run.font.bold = True
             logging.debug(f"  Added h5 header: {line_stripped[6:]}")
         elif line_stripped.startswith('#### '):
             # H4 header
@@ -349,6 +357,8 @@ def _populate_content_text_frame(text_frame, content: str, slide: 'Slide', confi
             remove_bullet(p)
             for run in p.runs:
                 run.font.size = Pt(h4_size)
+                if h4_bold:
+                    run.font.bold = True
             logging.debug(f"  Added h4 header: {line_stripped[5:]}")
         elif line_stripped.startswith('### '):
             # H3 header
@@ -358,6 +368,8 @@ def _populate_content_text_frame(text_frame, content: str, slide: 'Slide', confi
             remove_bullet(p)
             for run in p.runs:
                 run.font.size = Pt(h3_size)
+                if h3_bold:
+                    run.font.bold = True
             logging.debug(f"  Added h3 header: {line_stripped[4:]}")
         elif line_stripped.startswith('## '):
             # H2 header
@@ -367,6 +379,8 @@ def _populate_content_text_frame(text_frame, content: str, slide: 'Slide', confi
             remove_bullet(p)
             for run in p.runs:
                 run.font.size = Pt(h2_size)
+                if h2_bold:
+                    run.font.bold = True
             logging.debug(f"  Added h2 header: {line_stripped[3:]}")
         # Handle bullet points
         elif line_stripped.startswith('- '):
