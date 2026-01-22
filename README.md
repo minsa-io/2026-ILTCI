@@ -34,21 +34,25 @@ The generator parses Markdown files with slide separators and intelligently maps
 │       ├── html_media.py        # HTML and image extraction
 │       └── images.py            # Image handling
 ├── content/                      # Markdown content files
-│   ├── slides.md                # Slide content in Markdown format
-│   └── notes.md                 # Speaker notes (optional)
+│   └── slides.md                # Slide content in Markdown format
 ├── templates/                    # PowerPoint templates
 │   └── template.pptx            # Base presentation template with styling
 ├── assets/                       # Static resources
 │   ├── template-config.yaml     # Template styling configuration
+│   ├── layout-specs.yaml        # Layout specifications
 │   ├── iltci-theme.css          # Theme styling reference
-│   ├── title_slide_bg_image1.png
-│   └── title_slide_bg_image2.png
+│   ├── image-layout.css         # Image layout styling
+│   ├── streamlit-app.png        # App screenshot
+│   └── *.png                    # Various presentation images
+├── scripts/                      # Utility scripts
+│   ├── add_layouts.py           # Script to add layouts to template
+│   └── inspect_template.py      # Script to inspect template structure
 ├── docs/                         # Documentation
 │   ├── INSTALLATION.md          # Installation guide
+│   ├── IMAGE_STYLING_GUIDE.md   # Guide for image styling in slides
 │   ├── README_STYLING.md        # Styling guidelines
 │   └── template_styles_extracted.md  # Template style documentation
-├── output/                       # Generated presentations
-│   └── presentation.pptx        # Default output location
+├── output/                       # Generated presentations (created on run)
 ├── pyproject.toml               # Project dependencies
 └── README.md                    # This file
 ```
@@ -311,6 +315,7 @@ python src/generate_pptx.py --content content/advanced.md --output output/advanc
 Additional documentation is available in the [`docs/`](docs) directory:
 
 - **[`INSTALLATION.md`](docs/INSTALLATION.md)**: Detailed installation instructions
+- **[`IMAGE_STYLING_GUIDE.md`](docs/IMAGE_STYLING_GUIDE.md)**: Guide to image styling in slides
 - **[`README_STYLING.md`](docs/README_STYLING.md)**: Guide to styling and customization
 - **[`template_styles_extracted.md`](docs/template_styles_extracted.md)**: Template style reference
 
@@ -366,4 +371,4 @@ For issues or questions:
 
 ---
 
-**Last Updated**: January 2026
+**Last Updated**: January 22, 2026

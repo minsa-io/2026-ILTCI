@@ -124,6 +124,54 @@ If you prefer full control or can't use the Python script:
 
 ---
 
+## Controlling Vertical Spacing
+
+The presentation generator supports blank lines in markdown for controlling vertical spacing between content elements.
+
+### How It Works
+
+Blank lines in your markdown content (after the first line of content) are converted to spacer elements in the rendered slides. This allows you to:
+
+- Add visual separation between text blocks
+- Create breathing room between headers and body text
+- Control the vertical rhythm of your slides
+
+### Example
+
+```markdown
+# New skills
+
+**Using with Agents**
+
+You will need to learn how to integrate LLMs directly into your workspace
+
+This is a separate paragraph with space above it
+```
+
+In this example, the blank line between the bold text and the following paragraph creates vertical spacing in the rendered slide.
+
+### Configuration
+
+The amount of vertical spacing can be configured in `assets/template-config.yaml`:
+
+```yaml
+fonts:
+  title_slide:
+    spacer: 8    # Points of spacing for blank lines in title slides
+  content_slide:
+    spacer: 12   # Points of spacing for blank lines in content slides
+```
+
+Increase these values for more vertical space, decrease for less.
+
+### Notes
+
+- Blank lines before the first content line are ignored (leading blank lines are trimmed)
+- Multiple consecutive blank lines will each add spacing
+- This feature works with both title slides and content slides
+
+---
+
 ## Comparison Table
 
 | Feature | Marp CLI | Python Script | Manual |

@@ -11,22 +11,30 @@ fonts:
   title_slide:
     section_name: 40
     title: 50
-    subtitle: 24
+    subtitle_h2: 32
+    subtitle_h3: 24
+    subtitle_text: 20
+    spacer: 8  # Vertical spacing for blank lines in title slides
   content_slide:
     title: 32
-    h2_header: 32
+    h2_header: 28
     h3_header: 24
     h4_header: 20
     h5_header: 18
     body_text: 24
     bullet: 24
     numbered: 24
+    spacer: 12  # Vertical spacing for blank lines in content slides
 
 # Text formatting
 formatting:
   title_bold: true
   section_bold: true
   subtitle_bold: true
+  h2_bold: true
+  h3_bold: false
+  h4_bold: false
+  h5_bold: false
 
 # Image layout configuration (in inches)
 image_layout:

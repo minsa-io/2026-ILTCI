@@ -148,13 +148,69 @@ You can combine multiple classes for more control:
 </div>
 ```
 
+## Border and Rounded Corner Styling
+
+By default, all images in the generated PowerPoint presentation have:
+- **Rounded corners** (8px/0.1in radius)
+- **Border** (2pt solid, color #44546A - dark blue-gray)
+
+### Override Classes
+
+You can override these defaults per-image using the following classes:
+
+#### Border Controls
+- `.no-border` - Remove the border completely
+- `.border-thin` - Use a thinner border (1pt)
+- `.border-thick` - Use a thicker border (4pt)
+- `.border-light` - Use a lighter border color (#B4C6E7)
+- `.border-dark` - Use a darker border color (#2F3E4E)
+
+#### Rounded Corner Controls
+- `.no-rounded` - Remove rounded corners (square edges)
+- `.rounded-sm` - Use smaller rounded corners (4px/0.05in)
+- `.rounded-lg` - Use larger rounded corners (16px/0.2in)
+
+### Examples
+
+```html
+<!-- Image with no border -->
+<div class="image-container">
+  <img src="assets/screenshot.png" alt="Screenshot" class="img-large no-border">
+</div>
+
+<!-- Image with thick border and larger corners -->
+<div class="image-container">
+  <img src="assets/diagram.png" alt="Diagram" class="img-medium border-thick rounded-lg">
+</div>
+
+<!-- Image with no border and no rounded corners (square) -->
+<div class="image-container">
+  <img src="assets/photo.png" alt="Photo" class="img-large no-border no-rounded">
+</div>
+
+<!-- Combining multiple style classes -->
+<div class="image-container">
+  <img src="assets/chart.png" alt="Chart" class="img-medium border-thin border-light rounded-sm">
+</div>
+```
+
+### When to Override
+
+- **Screenshots**: Often look better without borders (`no-border`)
+- **Photos**: May benefit from no corners (`no-rounded`) for a natural look
+- **Diagrams**: Consider thicker borders (`border-thick`) for emphasis
+- **Side-by-side comparisons**: Use consistent styling for both images
+
 ## Tips
 
 1. **Consistency**: Use the same classes throughout your presentation for a cohesive look
 2. **Sizing**: Start with `.img-medium` (300px) and adjust as needed
 3. **Spacing**: The default gap (50px) works well for most cases
 4. **Testing**: Preview your slides after making changes to ensure proper layout
+5. **Borders**: The default border provides a clean framing effect; override with `no-border` for screenshots that should blend seamlessly
 
 ## Customization
 
 If you need custom sizes or layouts, edit [`assets/image-layout.css`](../assets/image-layout.css) to add new classes or modify existing ones.
+
+For deeper customization of border and corner styles, modify the `IMAGE_STYLE_DEFAULTS` and `STYLE_CLASS_MAP` constants in [`src/iltci_pptx/images.py`](../src/iltci_pptx/images.py).
