@@ -1,5 +1,44 @@
 /* Image Layout Styles for ILTCI Presentation */
 
+/* Default image styles - rounded corners and border */
+img {
+  border-radius: 8px;
+  border: 2px solid #44546A;
+}
+
+/* Override classes for customizing individual images */
+.no-border {
+  border: none !important;
+}
+
+.no-rounded {
+  border-radius: 0 !important;
+}
+
+.border-thin {
+  border-width: 1px !important;
+}
+
+.border-thick {
+  border-width: 4px !important;
+}
+
+.border-light {
+  border-color: #B4C6E7 !important;
+}
+
+.border-dark {
+  border-color: #2F3E4E !important;
+}
+
+.rounded-sm {
+  border-radius: 4px !important;
+}
+
+.rounded-lg {
+  border-radius: 16px !important;
+}
+
 /* Container for images */
 .image-container {
   display: flex;

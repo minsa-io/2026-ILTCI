@@ -11,7 +11,10 @@ fonts:
   title_slide:
     section_name: 40
     title: 50
-    subtitle: 24
+    subtitle_h2: 32
+    subtitle_h3: 24
+    subtitle_text: 20
+    spacer: 8  # Vertical spacing for blank lines in title slides
   content_slide:
     title: 32
     h2_header: 32
@@ -21,6 +24,7 @@ fonts:
     body_text: 24
     bullet: 24
     numbered: 24
+    spacer: 12  # Vertical spacing for blank lines in content slides
 
 # Text formatting
 formatting:

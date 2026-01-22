@@ -1,0 +1,169 @@
+content-bg:
+  description: Full background image with semi-transparent content overlay
+  elements:
+    background:
+      height: !!python/object/new:pptx.util.Inches
+      - 6858000
+      left: !!python/object/new:pptx.util.Inches
+      - 0
+      top: !!python/object/new:pptx.util.Inches
+      - 0
+      type: background_image
+      width: !!python/object/new:pptx.util.Inches
+      - 12188952
+    body:
+      height: !!python/object/new:pptx.util.Inches
+      - 4572000
+      left: !!python/object/new:pptx.util.Inches
+      - 685800
+      top: !!python/object/new:pptx.util.Inches
+      - 1600200
+      type: textbox
+      width: !!python/object/new:pptx.util.Inches
+      - 6858000
+    overlay:
+      fill_color: &id001 !!python/tuple
+      - 255
+      - 255
+      - 255
+      height: !!python/object/new:pptx.util.Inches
+      - 5943600
+      left: !!python/object/new:pptx.util.Inches
+      - 457200
+      top: !!python/object/new:pptx.util.Inches
+      - 457200
+      transparency: 0.25
+      type: rectangle
+      width: !!python/object/new:pptx.util.Inches
+      - 7315200
+    title:
+      height: !!python/object/new:pptx.util.Inches
+      - 731520
+      left: !!python/object/new:pptx.util.Inches
+      - 685800
+      top: !!python/object/new:pptx.util.Inches
+      - 685800
+      type: textbox
+      width: !!python/object/new:pptx.util.Inches
+      - 6858000
+image-side:
+  description: Text on left (60%), image on right (40%)
+  elements:
+    body:
+      height: !!python/object/new:pptx.util.Inches
+      - 5029200
+      left: !!python/object/new:pptx.util.Inches
+      - 457200
+      top: !!python/object/new:pptx.util.Inches
+      - 1097280
+      type: placeholder
+      width: !!python/object/new:pptx.util.Inches
+      - 5943600
+    picture:
+      height: !!python/object/new:pptx.util.Inches
+      - 5029200
+      left: !!python/object/new:pptx.util.Inches
+      - 6858000
+      top: !!python/object/new:pptx.util.Inches
+      - 1097280
+      type: picture_area
+      width: !!python/object/new:pptx.util.Inches
+      - 4873752
+    title:
+      height: !!python/object/new:pptx.util.Inches
+      - 731520
+      left: !!python/object/new:pptx.util.Inches
+      - 457200
+      top: !!python/object/new:pptx.util.Inches
+      - 182880
+      type: placeholder
+      width: !!python/object/new:pptx.util.Inches
+      - 11274552
+title-bg:
+  description: Full background image with title overlay at bottom
+  elements:
+    background:
+      height: !!python/object/new:pptx.util.Inches
+      - 6858000
+      left: !!python/object/new:pptx.util.Inches
+      - 0
+      top: !!python/object/new:pptx.util.Inches
+      - 0
+      type: background_image
+      width: !!python/object/new:pptx.util.Inches
+      - 12188952
+    overlay:
+      fill_color: !!python/tuple
+      - 0
+      - 0
+      - 0
+      height: !!python/object/new:pptx.util.Inches
+      - 2286000
+      left: !!python/object/new:pptx.util.Inches
+      - 0
+      top: !!python/object/new:pptx.util.Inches
+      - 4572000
+      transparency: 0.5
+      type: rectangle
+      width: !!python/object/new:pptx.util.Inches
+      - 12188952
+    subtitle:
+      font_color: *id001
+      font_size: !!python/object/new:pptx.util.Pt
+      - 304800
+      height: !!python/object/new:pptx.util.Inches
+      - 457200
+      left: !!python/object/new:pptx.util.Inches
+      - 457200
+      top: !!python/object/new:pptx.util.Inches
+      - 6172200
+      type: textbox
+      width: !!python/object/new:pptx.util.Inches
+      - 11274552
+    title:
+      font_color: *id001
+      font_size: !!python/object/new:pptx.util.Pt
+      - 558800
+      height: !!python/object/new:pptx.util.Inches
+      - 1371600
+      left: !!python/object/new:pptx.util.Inches
+      - 457200
+      top: !!python/object/new:pptx.util.Inches
+      - 4800600
+      type: textbox
+      width: !!python/object/new:pptx.util.Inches
+      - 11274552
+
+dual-image-text-bottom:
+  description: Two side-by-side images (top ~70%), text below (bottom ~30%)
+  elements:
+    picture_left:
+      left: 0.75
+      top: 1.2
+      width: 5.5
+      height: 4.0
+      type: picture_area
+    picture_right:
+      left: 6.75
+      top: 1.2
+      width: 5.5
+      height: 4.0
+      type: picture_area
+    body:
+      left: 0.5
+      top: 5.5
+      width: 12.0
+      height: 1.75
+      type: textbox
+    title:
+      left: 0.5
+      top: 0.2
+      width: 12.0
+      height: 0.8
+      type: placeholder
+
+# Style specifications for image captions
+image_caption:
+  color: '#333333'  # Off-black for better readability
+  font_size: 12     # 12pt font
+  align: 'left'     # Left-aligned with image

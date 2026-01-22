@@ -44,17 +44,33 @@ def has_html_content(text: str) -> bool:
     return bool(re.search(r'<[^>]+>', text))
 
 
-def remove_html_tags(text: str) -> str:
+def remove_html_tags(text: str, preserve_markers: list = None) -> str:
     """Remove HTML tags from text but preserve the content structure.
     
     Args:
         text: Text with HTML tags
+        preserve_markers: List of markers to preserve (default: ['<!-- spacer -->'])
         
     Returns:
         Text with HTML tags removed
     """
+    if preserve_markers is None:
+        preserve_markers = ['<!-- spacer -->']
+    
+    # Temporarily replace markers we want to preserve
+    preserved = {}
+    for i, marker in enumerate(preserve_markers):
+        placeholder = f'__PRESERVED_MARKER_{i}__'
+        preserved[placeholder] = marker
+        text = text.replace(marker, placeholder)
+    
     # Remove complete HTML blocks that we've processed (like img tags in divs)
     text = re.sub(r'<div[^>]*>.*?</div>', '', text, flags=re.DOTALL)
     # Remove any remaining standalone tags
     text = re.sub(r'<[^>]+>', '', text)
+    
+    # Restore preserved markers
+    for placeholder, marker in preserved.items():
+        text = text.replace(placeholder, marker)
+    
     return text.strip()
