@@ -9,10 +9,12 @@ from pptx.enum.shapes import MSO_SHAPE
 from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 from pptx.enum.text import PP_ALIGN
 from .config import Config
+from .markdown_parser import SlideData
 
 if TYPE_CHECKING:
     from pptx.slide import Slide
     from pptx.shapes.picture import Picture
+    from .layout_discovery import LayoutRegistry
 
 # Default image style settings for borders and rounded corners
 IMAGE_STYLE_DEFAULTS = {
@@ -34,6 +36,18 @@ STYLE_CLASS_MAP = {
     'rounded-sm': {'corner_radius': Inches(0.05)},
     'rounded-lg': {'corner_radius': Inches(0.2)},
 }
+
+
+def get_layout_spec_names(config: Config) -> List[str]:
+    """Get list of layout names that have image placement specs defined.
+    
+    Args:
+        config: Configuration object with layout_specs loaded
+        
+    Returns:
+        List of layout names that support image placement
+    """
+    return list(config.layout_specs.keys())
 
 
 def parse_style_classes(class_attr: str) -> Dict[str, Any]:
@@ -142,36 +156,6 @@ def _apply_rounded_corners(picture: 'Picture', radius: int) -> None:
         logging.warning("lxml not available, cannot apply rounded corners via XML")
     except Exception as e:
         logging.debug(f"Could not apply rounded corners: {e}")
-
-
-# Layout specifications for image-aware layouts
-# These match the specs in assets/layout-specs.yaml
-LAYOUT_SPECS = {
-    "image-side": {
-        "description": "Text on left (60%), image on right (40%)",
-        "picture": {"left": 7.5, "top": 1.2, "width": 5.33, "height": 5.5},
-        "body": {"left": 0.5, "top": 1.2, "width": 6.5, "height": 5.5},
-    },
-    "content-bg": {
-        "description": "Full background image with semi-transparent content overlay",
-        "background": {"left": 0, "top": 0, "width": 13.33, "height": 7.5},
-        "overlay": {"left": 0.5, "top": 0.5, "width": 8.0, "height": 6.5,
-                   "fill_color": (255, 255, 255), "transparency": 0.25},
-    },
-    "title-bg": {
-        "description": "Full background image with title overlay at bottom",
-        "background": {"left": 0, "top": 0, "width": 13.33, "height": 7.5},
-        "overlay": {"left": 0, "top": 5.0, "width": 13.33, "height": 2.5,
-                   "fill_color": (0, 0, 0), "transparency": 0.5},
-    },
-    "dual-image-text-bottom": {
-        "description": "Two side-by-side images (top ~70%), text below (bottom ~30%)",
-        "picture_left": {"left": 0.75, "top": 1.2, "width": 5.5, "height": 4.0},
-        "picture_right": {"left": 6.75, "top": 1.2, "width": 5.5, "height": 4.0},
-        "body": {"left": 0.5, "top": 5.5, "width": 12.0, "height": 1.75},
-        "title": {"left": 0.5, "top": 0.2, "width": 12.0, "height": 0.8},
-    },
-}
 
 
 def add_background_image(slide: 'Slide', img_path: Path, 
@@ -359,227 +343,117 @@ def add_image_to_area(slide: 'Slide', img_path: Path,
         return None
 
 
-def add_images_for_layout(slide: 'Slide', images: List[Dict[str, Any]], 
-                          layout_name: str, config: Config,
-                          base_path: Path = Path('.'),
-                          fit_mode: str = 'contain') -> None:
-    """Add images to slide based on layout type.
+def add_images_for_layout(
+    slide_data: SlideData,
+    slide: 'Slide',
+    config: Config,
+    registry: 'LayoutRegistry',
+    base_path: Optional[Path] = None,
+    fit_mode: str = 'contain'
+) -> None:
+    """Add images to slide based on layout specs from config.
+    
+    Uses config.layout_specs to determine where to place images for each layout.
+    No fallback behavior - if layout has no spec defined, images are not placed.
     
     Args:
+        slide_data: SlideData containing images list and layout_name
         slide: PowerPoint slide object
-        images: List of image dictionaries with 'src' key
-        layout_name: Layout type ('image-side', 'content-bg', 'title-bg')
-        config: Configuration object
-        base_path: Base path for resolving image paths
+        config: Configuration object with layout_specs
+        registry: LayoutRegistry for validation (currently unused but available)
+        base_path: Base path for resolving image paths (defaults to config.assets_dir)
         fit_mode: 'contain' or 'cover' for image fitting
     """
-    if not images:
+    if not slide_data.images:
         return
     
-    layout_spec = LAYOUT_SPECS.get(layout_name)
-    if not layout_spec:
-        logging.warning(f"Unknown layout: {layout_name}, using fallback placement")
-        add_images_to_slide(slide, images, config, base_path)
-        return
+    # Resolve base path for images
+    if base_path is None:
+        base_path = config.assets_dir
     
-    # Get first image path
-    first_img = images[0]
-    img_src = first_img.get('src', '')
-    if not img_src:
-        return
+    layout_name = slide_data.layout_name
     
-    img_path = base_path / img_src
+    # Get image placement specs from config
+    specs = config.layout_specs.get(layout_name, [])
     
-    if layout_name in ('content-bg', 'title-bg'):
-        # Background image layouts
-        bg_spec = layout_spec.get('background', {})
-        add_background_image(
-            slide, img_path,
-            width=bg_spec.get('width', 13.33),
-            height=bg_spec.get('height', 7.5)
+    if not specs:
+        # No image specs for this layout - strict mode: don't place images
+        logging.warning(
+            f"Layout '{layout_name}' has no image placement specs defined in layout-specs.yaml. "
+            f"{len(slide_data.images)} image(s) will not be placed. "
+            f"Available layouts with image specs: {get_layout_spec_names(config)}"
         )
-        
-        # Add overlay
-        overlay_spec = layout_spec.get('overlay', {})
-        if overlay_spec:
-            add_overlay_rectangle(
-                slide,
-                left=overlay_spec.get('left', 0),
-                top=overlay_spec.get('top', 0),
-                width=overlay_spec.get('width', 13.33),
-                height=overlay_spec.get('height', 7.5),
-                fill_color=overlay_spec.get('fill_color', (255, 255, 255)),
-                transparency=overlay_spec.get('transparency', 0.25)
-            )
-    
-    elif layout_name == 'image-side':
-        # Side image layout with optional caption
-        pic_spec = layout_spec.get('picture', {})
-        
-        # Get caption and class from data attributes
-        first_caption = first_img.get('data-caption', '')
-        first_class = first_img.get('class', '')
-        
-        add_image_with_caption(
-            slide, img_path,
-            left=pic_spec.get('left', 7.5),
-            top=pic_spec.get('top', 1.2),
-            width=pic_spec.get('width', 5.33),
-            height=pic_spec.get('height', 5.5),
-            caption=first_caption,
-            fit_mode=fit_mode,
-            class_attr=first_class
-        )
-        
-        # Handle additional images (fallback placement below main)
-        if len(images) > 1:
-            logging.info(f"Layout {layout_name} has {len(images)} images, placing extras below")
-            # Place remaining images using fallback
-            add_images_to_slide(slide, images[1:], config, base_path)
-    
-    elif layout_name == 'dual-image-text-bottom':
-        # Two side-by-side images at top, with optional captions
-        pic_left_spec = layout_spec.get('picture_left', {})
-        
-        # Get caption and class from data attributes
-        first_caption = first_img.get('data-caption', '')
-        first_class = first_img.get('class', '')
-        
-        add_image_with_caption(
-            slide, img_path,
-            left=pic_left_spec.get('left', 0.75),
-            top=pic_left_spec.get('top', 1.2),
-            width=pic_left_spec.get('width', 5.5),
-            height=pic_left_spec.get('height', 4.0),
-            caption=first_caption,
-            fit_mode=fit_mode,
-            class_attr=first_class
-        )
-        
-        # Add second image if present
-        if len(images) > 1:
-            second_img = images[1]
-            img_src2 = second_img.get('src', '')
-            if img_src2:
-                img_path2 = base_path / img_src2
-                pic_right_spec = layout_spec.get('picture_right', {})
-                second_caption = second_img.get('data-caption', '')
-                second_class = second_img.get('class', '')
-                add_image_with_caption(
-                    slide, img_path2,
-                    left=pic_right_spec.get('left', 6.75),
-                    top=pic_right_spec.get('top', 1.2),
-                    width=pic_right_spec.get('width', 5.5),
-                    height=pic_right_spec.get('height', 4.0),
-                    caption=second_caption,
-                    fit_mode=fit_mode,
-                    class_attr=second_class
-                )
-
-
-def add_images_to_slide(slide: 'Slide', images: List[Dict[str, Any]], 
-                        config: Config, base_path: Path = Path('.'),
-                        layout_name: Optional[str] = None,
-                        fit_mode: str = 'contain') -> None:
-    """Add images to a slide based on extracted image information.
-    
-    Args:
-        slide: PowerPoint slide object
-        images: List of image dictionaries with attributes
-        config: Configuration object
-        base_path: Base path for resolving image paths
-        layout_name: Optional layout name for layout-aware placement
-        fit_mode: 'contain' or 'cover' for image fitting
-    """
-    if not images:
         return
     
-    # If layout specified, use layout-aware placement
-    if layout_name and layout_name in LAYOUT_SPECS:
-        add_images_for_layout(slide, images, layout_name, config, base_path, fit_mode)
-        return
+    # Warn if more images than placement specs
+    if len(slide_data.images) > len(specs):
+        logging.warning(
+            f"Layout '{layout_name}' has {len(specs)} image placement area(s) but "
+            f"{len(slide_data.images)} images were provided. "
+            f"Only the first {len(specs)} image(s) will be placed."
+        )
     
-    # Fallback: Position-based placement with improved positioning
-    default_height = config.get('image_layout.default_height', 3.5)  # Taller images
-    default_width = config.get('image_layout.default_width', 3.0)    # Wider images  
-    gap_between = config.get('image_layout.gap_between', 0.5)
-    top_position = config.get('image_layout.top_position', 2.0)  # Higher position (was 4.0)
-    slide_width = config.get('image_layout.slide_width', 13.33)  # Widescreen
-    pixels_to_inches_factor = config.get('image_layout.pixels_to_inches', 72)
-    
-    # Calculate layout for multiple images
-    num_images = len(images)
-    
-    # Adjust dimensions based on number of images
-    if num_images == 1:
-        # Single image: place on right side like image-side layout
-        img_height = Inches(5.0)
-        img_width = Inches(5.0)
-        start_left = Inches(7.5)
-        top_pos = Inches(1.5)
-        total_gap = Inches(0)
-    elif num_images == 2:
-        # Two images: side by side, centered, higher up
-        img_height = Inches(default_height)
-        img_width = Inches(default_width)
-        total_gap = Inches(gap_between)
-        total_width = (img_width * num_images) + total_gap
-        start_left = (Inches(slide_width) - total_width) / 2
-        top_pos = Inches(top_position)
-    else:
-        # More images: original layout
-        img_height = Inches(default_height)
-        img_width = Inches(default_width)
-        total_gap = Inches(gap_between) * (num_images - 1) if num_images > 1 else Inches(0)
-        total_width = (img_width * num_images) + total_gap
-        start_left = (Inches(slide_width) - total_width) / 2
-        top_pos = Inches(top_position)
-    
-    for idx, img_info in enumerate(images):
+    # Place images according to specs
+    for i, img_info in enumerate(slide_data.images[:len(specs)]):
+        spec = specs[i]
+        
         img_src = img_info.get('src', '')
         if not img_src:
+            logging.warning(f"Image at index {i} has no 'src' attribute, skipping")
             continue
         
-        # Construct full path
         img_path = base_path / img_src
         
         if not img_path.exists():
             logging.warning(f"Image not found: {img_path}")
             continue
         
-        # Calculate position
-        if num_images == 1:
-            left = start_left
+        # Check if spec uses placeholder name or custom positioning
+        if 'name' in spec:
+            # Use template placeholder by name
+            ph_name = spec['name']
+            try:
+                from .placeholder_resolver import get_placeholder
+                ph = get_placeholder(slide, name=ph_name)
+                if ph:
+                    # Insert image into placeholder
+                    # Note: This requires the placeholder to support pictures
+                    # For now, use the placeholder's position and size
+                    left = ph.left.inches
+                    top = ph.top.inches
+                    width = ph.width.inches
+                    height = ph.height.inches
+                    
+                    class_attr = img_info.get('class', '')
+                    add_image_to_area(slide, img_path, left, top, width, height,
+                                     fit_mode=fit_mode, class_attr=class_attr)
+                    logging.info(f"Added image to placeholder '{ph_name}'")
+                else:
+                    logging.warning(f"Placeholder '{ph_name}' not found in slide")
+            except Exception as e:
+                logging.error(f"Error finding placeholder '{ph_name}': {e}")
         else:
-            left = start_left + (idx * (img_width + Inches(gap_between)))
-        
-        # Extract height from style if present
-        style = img_info.get('style', '')
-        height_match = re.search(r'height:\s*(\d+)px', style)
-        current_img_height = img_height
-        if height_match:
-            height_px = int(height_match.group(1))
-            current_img_height = Inches(height_px / pixels_to_inches_factor)
-        
-        # Get CSS class attribute for styling
-        class_attr = img_info.get('class', '')
-        image_style = parse_style_classes(class_attr)
-        
-        try:
-            # Add the image to the slide
-            picture = slide.shapes.add_picture(
-                str(img_path),
-                left,
-                top_pos,
-                height=current_img_height
-            )
+            # Use custom positioning from spec
+            left = spec.get('left', 0)
+            top = spec.get('top', 0)
+            width = spec.get('width', 5)
+            height = spec.get('height', 4)
             
-            # Apply image styling (border and rounded corners)
-            apply_image_style(picture, image_style)
+            class_attr = img_info.get('class', '')
+            caption = img_info.get('data-caption', '')
             
-            logging.info(f"Added image: {img_path} at position ({left}, {top_pos})")
-        except Exception as e:
-            logging.error(f"Error adding image {img_path}: {e}")
+            if caption:
+                add_image_with_caption(
+                    slide, img_path, left, top, width, height,
+                    caption=caption, fit_mode=fit_mode, class_attr=class_attr
+                )
+            else:
+                add_image_to_area(
+                    slide, img_path, left, top, width, height,
+                    fit_mode=fit_mode, class_attr=class_attr
+                )
+            
+            logging.info(f"Added image at ({left}, {top}) {width}x{height}")
 
 
 # Default caption style settings

@@ -221,3 +221,40 @@ class Config:
     def assets_dir(self) -> Path:
         """Get assets directory path."""
         return self.get_path('assets_dir')
+    
+    @property
+    def layout_specs(self) -> Dict[str, list]:
+        """Get layout specifications for image placement.
+        
+        Returns a dictionary mapping layout names to lists of image area
+        definitions. Each area can be either:
+        - A dict with {name: str} for template picture placeholders
+        - A dict with {left, top, width, height} for custom positioning
+        
+        Returns:
+            Dictionary of layout_name -> list of image area specs
+        """
+        layout_specs_path = self._resolve_path_value(
+            self._paths.get('layout_specs', 'assets/layout-specs.yaml')
+        )
+        
+        if not layout_specs_path.exists():
+            logging.warning(f"Layout specs not found: {layout_specs_path}")
+            return {}
+        
+        specs = load_yaml_file(layout_specs_path)
+        
+        # Filter out non-layout entries (like 'image_caption')
+        # Layout specs are lists of image areas
+        return {
+            k: v for k, v in specs.items()
+            if isinstance(v, list)
+        }
+    
+    @property
+    def image_styles(self) -> Dict[str, Any]:
+        """Get image style settings from config.
+        
+        Returns settings for image borders, rounded corners, etc.
+        """
+        return self.get('image_styles', {})
