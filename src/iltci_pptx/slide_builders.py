@@ -9,7 +9,7 @@ from typing import Dict, Any, TYPE_CHECKING
 from .config import Config
 from .rich_text import add_formatted_text, add_bullet, remove_bullet, add_numbering
 from .html_media import has_html_content, extract_images_from_html, remove_html_tags
-from .images import add_images_to_slide, add_images_for_layout, add_background_image, add_overlay_rectangle, LAYOUT_SPECS
+from .images import add_images_to_slide, add_images_for_layout, add_background_image, add_overlay_rectangle, get_layout_spec
 from .markdown_parser import SPACER_MARKER
 from pathlib import Path
 
@@ -435,7 +435,7 @@ def _populate_content_text_frame(text_frame, content: str, slide: 'Slide', confi
     # Add images if any were found
     if images:
         logging.info(f"Adding {len(images)} images to slide...")
-        add_images_to_slide(slide, images, config, base_path=Path('.'))
+        add_images_to_slide(slide, images, config, base_path=config.assets_dir)
 
 
 def build_layout_slide(prs: 'Presentation', slide_data: Dict[str, Any], 
@@ -453,7 +453,7 @@ def build_layout_slide(prs: 'Presentation', slide_data: Dict[str, Any],
         Created slide object
     """
     layout_name = slide_data.get('layout', 'image-side')
-    layout_spec = LAYOUT_SPECS.get(layout_name)
+    layout_spec = get_layout_spec(config, layout_name)
     
     if not layout_spec:
         logging.warning(f"Unknown layout '{layout_name}', falling back to content slide")
@@ -523,8 +523,8 @@ def _build_image_side_slide(slide: 'Slide', slide_data: Dict[str, Any],
                 break
     
     # Resize content placeholder to left 60% for image-side layout
-    layout_spec = LAYOUT_SPECS['image-side']
-    body_spec = layout_spec.get('body', {})
+    layout_spec = get_layout_spec(config, 'image-side')
+    body_spec = layout_spec.get('body', {}) if layout_spec else {}
     
     if content_shape:
         # Adjust content shape size to make room for image
@@ -547,8 +547,8 @@ def _build_image_side_slide(slide: 'Slide', slide_data: Dict[str, Any],
     
     # Add images to right side
     if images:
-        add_images_for_layout(slide, images, 'image-side', config, 
-                              base_path=Path('.'), fit_mode=fit_mode)
+        add_images_for_layout(slide, images, 'image-side', config,
+                              base_path=config.assets_dir, fit_mode=fit_mode)
 
 
 def _build_content_bg_slide(slide: 'Slide', slide_data: Dict[str, Any],
@@ -564,7 +564,7 @@ def _build_content_bg_slide(slide: 'Slide', slide_data: Dict[str, Any],
         config: Configuration object
         fit_mode: Image fit mode
     """
-    layout_spec = LAYOUT_SPECS['content-bg']
+    layout_spec = get_layout_spec(config, 'content-bg') or {}
     
     # Add background image first (will be at back)
     if images:
@@ -624,7 +624,7 @@ def _build_title_bg_slide(slide: 'Slide', slide_data: Dict[str, Any],
         config: Configuration object
         fit_mode: Image fit mode
     """
-    layout_spec = LAYOUT_SPECS['title-bg']
+    layout_spec = get_layout_spec(config, 'title-bg') or {}
     
     # Add background image first (will be at back)
     if images:
@@ -697,7 +697,7 @@ def _build_dual_image_slide(slide: 'Slide', slide_data: Dict[str, Any],
         config: Configuration object
         fit_mode: Image fit mode ('contain' or 'cover')
     """
-    layout_spec = LAYOUT_SPECS['dual-image-text-bottom']
+    layout_spec = get_layout_spec(config, 'dual-image-text-bottom') or {}
     
     # Set title
     if slide.shapes.title:
@@ -707,7 +707,7 @@ def _build_dual_image_slide(slide: 'Slide', slide_data: Dict[str, Any],
     # Add images using add_images_for_layout (handles both images)
     if images:
         add_images_for_layout(slide, images, 'dual-image-text-bottom', config,
-                              base_path=Path('.'), fit_mode=fit_mode)
+                              base_path=config.assets_dir, fit_mode=fit_mode)
     
     # Add body text box below images
     body_spec = layout_spec.get('body', {})

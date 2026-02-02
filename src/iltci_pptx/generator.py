@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from .config import Config
 from .markdown_parser import parse_markdown_slides
 from .slide_builders import build_title_slide, build_content_slide, build_layout_slide
+from .style_config import validate_styles_config, StyleConfigError
 
 
 class PresentationGenerator:
@@ -28,6 +29,11 @@ class PresentationGenerator:
         """
         # Validate paths exist
         self.config.validate_paths()
+        
+        # Validate style configuration (raises StyleConfigError if invalid)
+        logging.debug("Validating style configuration...")
+        validate_styles_config(self.config)
+        logging.debug("Style configuration validated successfully")
         
         # Parse markdown content first to get frontmatter
         content_path = self.config.content_path
