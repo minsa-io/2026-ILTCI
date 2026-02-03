@@ -144,19 +144,39 @@ def populate_slide(
     # Populate content if found
     if content_ph and data.content_blocks:
         text_frame = content_ph.text_frame
-        build_rich_content(text_frame, data.content_blocks, config)
+        build_rich_content(text_frame, data.content_blocks, config, data.layout_name)
         logger.debug(f"  Populated {len(data.content_blocks)} content blocks")
+
+
+def _normalize_layout_key(layout_name: str) -> str:
+    """Normalize layout name to a config-friendly key.
+    
+    Converts layout names like "Image Right" to "image_right" for config lookup.
+    
+    Args:
+        layout_name: Layout name from template (e.g., "Image Right", "Dual Image")
+        
+    Returns:
+        Normalized key (e.g., "image_right", "dual_image")
+    """
+    return layout_name.lower().replace(" ", "_")
 
 
 def build_rich_content(
     text_frame: "TextFrame",
     content_blocks: list[str],
     config: Config,
+    layout_name: str = "",
 ) -> None:
     """Build rich content from content blocks into a text frame.
     
     Processes content blocks (paragraphs, bullets, headers, spacers) and
     applies appropriate formatting based on configuration.
+    
+    Font sizes are looked up in order:
+    1. fonts.<layout_key>.<property>_pt (e.g., fonts.text.h2_header_pt)
+    2. fonts.<layout_key>.<property> (e.g., fonts.text.h2_header)
+    3. Default values
     
     Supports:
     - Headers: ## (H2), ### (H3), #### (H4), ##### (H5)
@@ -169,29 +189,76 @@ def build_rich_content(
         text_frame: PowerPoint text frame to populate.
         content_blocks: List of content strings to process.
         config: Configuration object for fonts and formatting.
+        layout_name: Layout name for config lookup (e.g., "Text", "Image Right")
         
     Example:
-        >>> build_rich_content(text_frame, ["## Introduction", "- Point 1", "- Point 2"], config)
+        >>> build_rich_content(text_frame, ["## Introduction", "- Point 1"], config, "Text")
     """
     # Clear existing content
     text_frame.clear()
     
-    # Get font sizes from config
-    h2_size = config.get("fonts.content_slide.h2_header", 32)
-    h3_size = config.get("fonts.content_slide.h3_header", 24)
-    h4_size = config.get("fonts.content_slide.h4_header", 20)
-    h5_size = config.get("fonts.content_slide.h5_header", 18)
-    body_size = config.get("fonts.content_slide.body_text", 24)
-    bullet_size = config.get("fonts.content_slide.bullet", 24)
-    numbered_size = config.get("fonts.content_slide.numbered", 24)
-    spacer_size = config.get("fonts.content_slide.spacer", 12)
+    # Normalize layout name for config lookup
+    layout_key = _normalize_layout_key(layout_name) if layout_name else ""
+    
+    def get_font_size(prop: str, default: int) -> int:
+        """Get font size from config, trying layout-specific then fallback paths."""
+        if layout_key:
+            # Try layout-specific with _pt suffix first
+            val = config.get(f"fonts.{layout_key}.{prop}_pt", None)
+            if val is not None:
+                return val
+            # Try layout-specific without suffix
+            val = config.get(f"fonts.{layout_key}.{prop}", None)
+            if val is not None:
+                return val
+        return default
+    
+    def get_formatting(prop: str, default: bool) -> bool:
+        """Get formatting setting from config, trying layout-specific then fallback."""
+        if layout_key:
+            # Try layout-specific formatting
+            val = config.get(f"formatting.{layout_key}.{prop}", None)
+            if val is not None:
+                return val
+        # Try global formatting
+        val = config.get(f"formatting.{prop}", None)
+        if val is not None:
+            return val
+        return default
+    
+    def get_spacing(prop: str, default):
+        """Get spacing setting from config, trying layout-specific then fallback."""
+        if layout_key:
+            # Try layout-specific spacing
+            val = config.get(f"spacing.{layout_key}.{prop}", None)
+            if val is not None:
+                return val
+        # Try global spacing
+        val = config.get(f"spacing.{prop}", None)
+        if val is not None:
+            return val
+        return default
+    
+    # Get font sizes using layout-aware lookup
+    h2_size = get_font_size("h2_header", 28)
+    h3_size = get_font_size("h3_header", 24)
+    h4_size = get_font_size("h4_header", 20)
+    h5_size = get_font_size("h5_header", 18)
+    body_size = get_font_size("body_text", 24)
+    bullet_size = get_font_size("bullet", 24)
+    numbered_size = get_font_size("numbered", 24)
+    spacer_size = get_font_size("spacer", 12)
     numbering_type = config.get("bullets.numbering_type", "arabicPeriod")
     
-    # Get bold settings from config
-    h2_bold = config.get("formatting.h2_bold", True)
-    h3_bold = config.get("formatting.h3_bold", False)
-    h4_bold = config.get("formatting.h4_bold", False)
-    h5_bold = config.get("formatting.h5_bold", False)
+    # Get bold settings using layout-aware lookup
+    h2_bold = get_formatting("h2_bold", True)
+    h3_bold = get_formatting("h3_bold", False)
+    h4_bold = get_formatting("h4_bold", False)
+    h5_bold = get_formatting("h5_bold", False)
+    
+    # Get spacing settings using layout-aware lookup
+    line_spacing = get_spacing("line_spacing", None)  # None = use template default
+    space_after_pt = get_spacing("space_after_pt", None)  # None = use template default
     
     # Process each content block
     for block in content_blocks:
@@ -217,6 +284,8 @@ def build_rich_content(
                 h3_bold=h3_bold,
                 h4_bold=h4_bold,
                 h5_bold=h5_bold,
+                line_spacing=line_spacing,
+                space_after_pt=space_after_pt,
             )
 
 
@@ -237,6 +306,8 @@ def _add_content_line(
     h3_bold: bool,
     h4_bold: bool,
     h5_bold: bool,
+    line_spacing: float | None = None,
+    space_after_pt: int | None = None,
 ) -> None:
     """Add a single content line to a text frame with appropriate formatting.
     
@@ -247,7 +318,16 @@ def _add_content_line(
         text_frame: PowerPoint text frame to add content to.
         line: Single stripped line of content.
         h2_size - h5_bold: Formatting parameters from config.
+        line_spacing: Line spacing multiplier (1.0 = single, None = template default).
+        space_after_pt: Space after paragraph in points (None = template default).
     """
+    def _apply_paragraph_spacing(para):
+        """Apply line spacing and space_after to a paragraph if configured."""
+        if line_spacing is not None:
+            para.line_spacing = line_spacing
+        if space_after_pt is not None:
+            para.space_after = Pt(space_after_pt)
+    
     # Handle spacer markers (blank lines in markdown)
     if line == SPACER_MARKER:
         p = text_frame.add_paragraph()
@@ -267,6 +347,7 @@ def _add_content_line(
         add_formatted_text(p, line[6:])
         p.level = 0
         remove_bullet(p)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(h5_size)
             if h5_bold:
@@ -280,6 +361,7 @@ def _add_content_line(
         add_formatted_text(p, line[5:])
         p.level = 0
         remove_bullet(p)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(h4_size)
             if h4_bold:
@@ -293,6 +375,7 @@ def _add_content_line(
         add_formatted_text(p, line[4:])
         p.level = 0
         remove_bullet(p)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(h3_size)
             if h3_bold:
@@ -306,6 +389,7 @@ def _add_content_line(
         add_formatted_text(p, line[3:])
         p.level = 0
         remove_bullet(p)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(h2_size)
             if h2_bold:
@@ -319,6 +403,7 @@ def _add_content_line(
         add_formatted_text(p, line[4:])
         p.level = 1
         add_bullet(p, level=1)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(bullet_size)
         logger.debug(f"  Added sub-bullet: {line[4:]}")
@@ -330,6 +415,7 @@ def _add_content_line(
         add_formatted_text(p, line[2:])
         p.level = 0
         add_bullet(p, level=0)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(bullet_size)
         logger.debug(f"  Added bullet: {line[2:]}")
@@ -344,6 +430,7 @@ def _add_content_line(
         add_formatted_text(p, text)
         p.level = 0
         add_numbering(p, start_at=num, numbering_type=numbering_type)
+        _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(numbered_size)
         logger.debug(f"  Added numbered item {num}: {text}")
@@ -353,6 +440,7 @@ def _add_content_line(
     p = text_frame.add_paragraph()
     add_formatted_text(p, line)
     remove_bullet(p)
+    _apply_paragraph_spacing(p)
     for run in p.runs:
         run.font.size = Pt(body_size)
     logger.debug(f"  Added text: {line}")
