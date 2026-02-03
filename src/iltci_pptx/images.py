@@ -496,27 +496,43 @@ def add_image_caption(slide: 'Slide', caption: str,
             Inches(left),
             Inches(top),
             Inches(width),
-            Inches(0.4)  # Height for ~1-2 lines of caption
+            Inches(0.6)  # Height for multiple lines of caption
         )
         
         caption_frame = caption_box.text_frame
         caption_frame.word_wrap = True
         
-        # Add caption text (interpret \n as newlines)
+        # Split caption text into lines (interpret \n as newlines, ; as separator)
         caption_text = caption.replace('\\n', '\n')
-        p = caption_frame.paragraphs[0]
-        p.text = caption_text
-        p.alignment = caption_style['align']
+        # Also split on semicolon followed by space for inline multi-line captions
+        caption_text = caption_text.replace('; ', '\n')
+        lines = caption_text.split('\n')
         
-        # Style the text
-        for run in p.runs:
-            run.font.size = Pt(caption_style['font_size'])
-            run.font.color.rgb = caption_style['color']
+        # Add each line as a separate paragraph
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            if i == 0:
+                # Use existing first paragraph
+                p = caption_frame.paragraphs[0]
+            else:
+                # Add new paragraph for subsequent lines
+                p = caption_frame.add_paragraph()
+            
+            p.text = line
+            p.alignment = caption_style['align']
+            
+            # Style the text
+            for run in p.runs:
+                run.font.size = Pt(caption_style['font_size'])
+                run.font.color.rgb = caption_style['color']
         
         # Remove any fill/background on the textbox
         caption_box.fill.background()
         
-        logging.info(f"Added caption: '{caption}' at ({left}, {top})")
+        logging.info(f"Added caption with {len(lines)} line(s): '{caption}' at ({left}, {top})")
         
     except Exception as e:
         logging.error(f"Error adding caption: {e}")

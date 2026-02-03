@@ -120,9 +120,10 @@ def populate_slide(
         if title_ph is None:
             logger.warning(f"  No title placeholder found for slide '{data.layout_name}'")
     
-    # Try to find content placeholder (BODY or SUBTITLE for title slides)
+    # Try to find content placeholder (BODY, OBJECT, or SUBTITLE for title slides)
+    # Note: Some templates use OBJECT type for content placeholders instead of BODY
     if data.content_blocks:
-        for content_type in ["body", "subtitle"]:
+        for content_type in ["body", "object", "subtitle"]:
             try:
                 result = resolve_placeholders(slide, {"content": content_type})
                 content_ph = result.get("content")
