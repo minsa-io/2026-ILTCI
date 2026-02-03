@@ -1,0 +1,107 @@
+# Only the targeted overrides for POTX generation.
+# These per-image-src overrides take precedence over defaults and class-based styles.
+
+# =============================================================================
+# FONTS (sizes in points) - per layout type
+# =============================================================================
+# Layout names from template.potx: "Title", "Text", "Image Right", "Dual Image"
+
+fonts:
+  title:
+    section_name_pt: 40
+    title_pt: 50
+    subtitle_h2_pt: 32
+    subtitle_h3_pt: 24
+    subtitle_text_pt: 22
+    spacer_pt: 8
+  text:
+    title_pt: 44
+    h2_header_pt: 28
+    h3_header_pt: 24
+    h4_header_pt: 20
+    h5_header_pt: 18
+    body_text_pt: 24
+    bullet_pt: 24
+    numbered_pt: 24
+    spacer_pt: 12
+  image_right:
+    title_pt: 44
+    h2_header_pt: 28
+    h3_header_pt: 24
+    h4_header_pt: 20
+    h5_header_pt: 18
+    body_text_pt: 22
+    bullet_pt: 22
+    numbered_pt: 22
+    spacer_pt: 12
+  dual_image:
+    title_pt: 44
+    h2_header_pt: 28
+    h3_header_pt: 24
+    h4_header_pt: 20
+    h5_header_pt: 18
+    body_text_pt: 22
+    bullet_pt: 24
+    numbered_pt: 24
+    spacer_pt: 12
+
+# =============================================================================
+# TEXT FORMATTING - per layout type
+# =============================================================================
+
+formatting:
+  title:
+    title_bold: true
+    section_bold: true
+    subtitle_bold: true
+  text:
+    h2_bold: true
+    h3_bold: false
+    h4_bold: false
+    h5_bold: false
+  image_right:
+    h2_bold: true
+    h3_bold: false
+    h4_bold: false
+    h5_bold: false
+  dual_image:
+    h2_bold: true
+    h3_bold: false
+    h4_bold: false
+    h5_bold: false
+
+# =============================================================================
+# PARAGRAPH SPACING - per layout type
+# =============================================================================
+# line_spacing: 1.0 = single spacing (100%), matches reference PPTX
+# space_after_pt: points of space after each paragraph
+
+spacing:
+  text:
+    line_spacing: 1.0
+    space_after_pt: 0
+  image_right:
+    line_spacing: 1.0
+    space_after_pt: 0
+  dual_image:
+    line_spacing: 1.0
+    space_after_pt: 0
+
+# =============================================================================
+# IMAGE STYLES
+# =============================================================================
+
+image_styles:
+  per_image_src:
+    git-jj.png:
+      border_enabled: false
+      rounded_enabled: false
+    markdown-raw-preview.png:
+      border_enabled: false
+      rounded_enabled: false
+    menugen-upload.png:
+      rounded_enabled: false
+    menugen-images.png:
+      rounded_enabled: false
+    minesweeper-analysis.png:
+      rounded_enabled: false

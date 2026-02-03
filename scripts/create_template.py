@@ -96,7 +96,158 @@ def create_template():
     prs.save(output_path)
     print(f"\nTemplate saved to: {output_path}")
     
+    # Post-process to set paragraph properties via python-pptx API
+    # XML attributes may not suffice for alignment/indent behavior
+    post_process_template(output_path)
+    
     return output_path
+
+
+def set_paragraph_indent_xml(pPr, left_margin=0, first_line_indent=0):
+    """
+    Set paragraph indent properties via XML attributes.
+    
+    Args:
+        pPr: The paragraph properties element (_pPr from a _Paragraph)
+             or None if paragraph properties don't exist
+        left_margin: Left margin in inches (0 for no indent)
+        first_line_indent: First line indent in inches (0 for no hanging indent)
+    """
+    if pPr is None:
+        return
+    
+    # Convert to EMU (English Metric Units)
+    marL_emu = int(left_margin * 914400)
+    indent_emu = int(first_line_indent * 914400)
+    
+    # Set marL and indent attributes
+    pPr.set(qn('a:marL') if 'a:' not in str(pPr.tag) else 'marL', str(marL_emu))
+    pPr.set('marL', str(marL_emu))
+    pPr.set('indent', str(indent_emu))
+
+
+def post_process_template(template_path):
+    """
+    Post-process the template to set paragraph properties via python-pptx API.
+    
+    This function sets paragraph formatting at TWO levels:
+    1. lstStyle (level properties): Defines defaults inherited by NEW paragraphs
+       - Includes proper bullet/numbered list margins and hanging indents
+       - Creates space between bullet character and text
+    2. pPr (paragraph properties): Sets alignment on sample/existing paragraphs
+    
+    Settings applied:
+    - Title layout: title, subtitle, text LEFT aligned
+    - All other layouts: titles LEFT aligned
+    - Dual image layout body: CENTER aligned
+    - Bullet/numbered formatting with proper hanging indent at all levels
+    """
+    print("\nPost-processing template to set paragraph formatting...")
+    
+    prs = Presentation(template_path)
+    master = prs.slide_masters[0]
+    
+    for layout in master.slide_layouts:
+        layout_name = layout.name
+        print(f"  Processing layout: {layout_name}")
+        
+        for shape in layout.shapes:
+            if not shape.has_text_frame:
+                continue
+            
+            tf = shape.text_frame
+            ph_type = None
+            if shape.is_placeholder:
+                ph_type = shape.placeholder_format.type
+            
+            # Determine alignment based on layout and placeholder type
+            if layout_name == "Dual Image" and ph_type == PP_PLACEHOLDER.BODY:
+                target_align = 'ctr'  # Center for dual image body
+            else:
+                target_align = 'l'    # Left for everything else
+            
+            # CRITICAL: Set lstStyle to define defaults for NEW paragraphs
+            # This includes proper bullet/numbered list formatting with hanging indents
+            set_lstStyle_alignment(tf, target_align)
+            
+            # Set alignment on existing paragraphs (sample text)
+            # Note: We don't override marL/indent here - let lstStyle control that
+            for para in tf.paragraphs:
+                if target_align == 'ctr':
+                    para.alignment = PP_ALIGN.CENTER
+                else:
+                    para.alignment = PP_ALIGN.LEFT
+    
+    # Also process master-level placeholders
+    print("  Processing master placeholders...")
+    for shape in master.shapes:
+        if not shape.has_text_frame:
+            continue
+        
+        tf = shape.text_frame
+        set_lstStyle_alignment(tf, 'l')
+        for para in tf.paragraphs:
+            para.alignment = PP_ALIGN.LEFT
+    
+    # Save the updated template
+    prs.save(template_path)
+    print(f"  Saved post-processed template to: {template_path}")
+
+
+def set_lstStyle_alignment(text_frame, align='l'):
+    """
+    Set default paragraph properties in lstStyle for new paragraphs.
+    
+    This is critical because when slide_builders adds new paragraphs via
+    text_frame.add_paragraph(), they inherit from lstStyle, not from existing
+    paragraph properties.
+    
+    CRITICAL FIX: Set marL="0" and indent="0" EXPLICITLY for all levels.
+    This prevents indentation on wrapped lines in headers and plain text.
+    
+    TRADE-OFF: Bullets will not have hanging indent from lstStyle.
+    For proper bullet formatting, the generator's add_bullet() function
+    should set marL and indent on the paragraph's pPr directly when
+    adding bullet formatting.
+    
+    In python-pptx, paragraph.level maps to lvlXpPr as follows:
+    - level 0 -> lvl1pPr (used for level-0 bullets AND plain text)
+    - level 1 -> lvl2pPr (used for level-1 sub-bullets)
+    - etc.
+    
+    Args:
+        text_frame: TextFrame object
+        align: Alignment value ('l', 'ctr', 'r' for left, center, right)
+    """
+    txBody = text_frame._txBody
+    lstStyle = txBody.find(qn('a:lstStyle'))
+    
+    if lstStyle is None:
+        # Create lstStyle if missing
+        lstStyle = etree.SubElement(txBody, qn('a:lstStyle'))
+    
+    # Add/update level paragraph properties for levels 0-8
+    # CRITICAL: Set marL="0" and indent="0" explicitly for ALL levels
+    # to prevent wrapped line indentation on headers and plain text
+    for level in range(9):
+        lvl_tag = f'a:lvl{level + 1}pPr'
+        lvl_elem = lstStyle.find(qn(lvl_tag))
+        
+        if lvl_elem is None:
+            lvl_elem = etree.SubElement(lstStyle, qn(lvl_tag))
+        
+        # Set alignment
+        lvl_elem.set('algn', align)
+        
+        # CRITICAL FIX: Set marL and indent to 0 EXPLICITLY
+        # This prevents wrapped line indentation in headers and plain text
+        lvl_elem.set('marL', '0')
+        lvl_elem.set('indent', '0')
+        
+        # Remove tabLst if present - not needed
+        tabLst = lvl_elem.find(qn('a:tabLst'))
+        if tabLst is not None:
+            lvl_elem.remove(tabLst)
 
 
 def configure_content_master(master):
@@ -320,7 +471,7 @@ def add_master_placeholders(master):
     """Add styled placeholders to master that layouts will inherit."""
     spTree = master.shapes._spTree
     
-    # Title placeholder in header bar area
+    # Title placeholder in header bar area - left-aligned with no indent
     add_placeholder_shape(
         spTree, 
         ph_type='title',
@@ -331,10 +482,13 @@ def add_master_placeholders(master):
         font_size_pt=44,
         bold=False,
         font_color=None,  # Use scheme color
-        anchor='ctr'
+        anchor='ctr',
+        p_align='l',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
-    # Body placeholder (OBJECT type) for main content
+    # Body placeholder (OBJECT type) for main content - no indent
     add_placeholder_shape(
         spTree,
         ph_type='body',
@@ -344,7 +498,9 @@ def add_master_placeholders(master):
         font_name="Calibri",
         font_size_pt=24,
         bold=False,
-        font_color=None
+        font_color=None,
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Slide number placeholder
@@ -359,7 +515,7 @@ def add_master_placeholders(master):
 
 def add_placeholder_shape(spTree, ph_type, idx, left, top, width, height, name=None,
                           font_name=None, font_size_pt=None, bold=None, font_color=None,
-                          anchor=None):
+                          anchor=None, p_align=None, left_margin_in=None, first_line_indent_in=None):
     """
     Add a placeholder shape to spTree using low-level XML.
     
@@ -374,6 +530,9 @@ def add_placeholder_shape(spTree, ph_type, idx, left, top, width, height, name=N
         bold: Bold flag
         font_color: RGBColor for text
         anchor: Text anchor ('t', 'ctr', 'b')
+        p_align: Paragraph alignment ('l', 'ctr', 'r') for default text alignment
+        left_margin_in: Left margin in inches (converted to EMU for marL attribute)
+        first_line_indent_in: First line indent in inches (converted to EMU for indent attribute)
     """
     # Generate unique ID
     existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
@@ -394,6 +553,27 @@ def add_placeholder_shape(spTree, ph_type, idx, left, top, width, height, name=N
     top_emu = int(top * 914400)
     width_emu = int(width * 914400)
     height_emu = int(height * 914400)
+    
+    # Build paragraph properties (pPr) for the sample paragraph
+    # CRITICAL: Always set marL=0 and indent=0 to prevent wrapped line indentation
+    # Also add buNone to suppress bullets on this sample paragraph
+    # When the generator adds bullets, it will override with buChar/buAutoNum
+    pPr_attrs = ['marL="0"', 'indent="0"']
+    if p_align:
+        pPr_attrs.append(f'algn="{p_align}"')
+    
+    # The pPr element includes buNone to explicitly suppress bullets on the sample
+    # This ensures plain text in the placeholder doesn't inherit bullet margins
+    pPr_xml = f'<a:pPr {" ".join(pPr_attrs)}><a:buNone/></a:pPr>'
+    
+    # Build lstStyle with explicit zero margins for all levels
+    # CRITICAL: marL="0" and indent="0" prevent wrapped line indentation
+    # For bullet formatting, the generator should set marL/indent directly on the paragraph
+    lstStyle_xml = '<a:lstStyle>'
+    for lvl in range(1, 10):
+        algn_attr = f' algn="{p_align}"' if p_align else ''
+        lstStyle_xml += f'<a:lvl{lvl}pPr marL="0" indent="0"{algn_attr}/>'
+    lstStyle_xml += '</a:lstStyle>'
     
     # Build XML for shape
     sp_xml = f'''
@@ -420,8 +600,9 @@ def add_placeholder_shape(spTree, ph_type, idx, left, top, width, height, name=N
       </p:spPr>
       <p:txBody>
         <a:bodyPr{' anchor="' + anchor + '"' if anchor else ''}/>
-        <a:lstStyle/>
+        {lstStyle_xml}
         <a:p>
+          {pPr_xml}
           <a:endParaRPr lang="en-US"/>
         </a:p>
       </p:txBody>
@@ -631,29 +812,36 @@ def configure_title_layout(layout):
     if os.path.exists(BACKGROUND_IMAGE):
         add_title_layout_background(layout)
     
-    # Center Title placeholder - styled with dark blue, bold, 50pt
+    # Title placeholder - styled with dark blue, bold, 50pt, left-aligned
+    # left_margin_in=0 and first_line_indent_in=0 ensure no hanging indent on wrapped lines
     add_placeholder_shape(
         spTree,
-        ph_type='ctrTitle',
+        ph_type='title',
         idx=0,
         left=0.22, top=3.07, width=12.81, height=1.08,
         name="Title 1",
         font_name="Calibri",
         font_size_pt=50,
         bold=True,
-        font_color=DARK_BLUE
+        font_color=DARK_BLUE,
+        p_align='l',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
-    # Subtitle placeholder
+    # Subtitle placeholder - left-aligned, positioned below title
     add_placeholder_shape(
         spTree,
         ph_type='subTitle',
         idx=1,
-        left=0.67, top=1.75, width=12.0, height=4.35,
+        left=0.22, top=4.10, width=12.0, height=2.00,
         name="Subtitle 2",
         font_name="Calibri",
         font_size_pt=24,
-        bold=False
+        bold=False,
+        p_align='l',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Add track name textbox
@@ -716,11 +904,11 @@ def add_title_layout_track_name(layout):
     existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
     new_id = max(existing_ids) + 1 if existing_ids else 2
     
-    # Position/size in EMU
-    left_emu = int(0.22 * 914400)
-    top_emu = int(4.40 * 914400)
-    width_emu = int(12.81 * 914400)
-    height_emu = int(0.70 * 914400)
+    # Position/size in EMU - moved to upper-left
+    left_emu = int(0.30 * 914400)
+    top_emu = int(0.25 * 914400)
+    width_emu = int(6.0 * 914400)
+    height_emu = int(0.50 * 914400)
     
     # Track name color as hex
     track_hex = f"{TRACK_GREEN[0]:02X}{TRACK_GREEN[1]:02X}{TRACK_GREEN[2]:02X}"
@@ -779,7 +967,8 @@ def configure_text_layout(layout):
     """
     spTree = layout.shapes._spTree
     
-    # Title at top (in header bar area)
+    # Title at top (in header bar area), left-aligned
+    # left_margin_in=0 and first_line_indent_in=0 ensure no hanging indent
     add_placeholder_shape(
         spTree,
         ph_type='title',
@@ -789,10 +978,14 @@ def configure_text_layout(layout):
         font_name="Calibri Light",
         font_size_pt=44,
         bold=False,
-        anchor='ctr'
+        anchor='ctr',
+        p_align='l',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Object placeholder for content (using 'obj' type instead of 'body')
+    # Default paragraph settings ensure no unwanted indentation
     add_placeholder_shape(
         spTree,
         ph_type='obj',
@@ -800,7 +993,9 @@ def configure_text_layout(layout):
         left=0.92, top=1.17, width=11.5, height=5.52,
         name="Content Placeholder 2",
         font_name="Calibri",
-        font_size_pt=24
+        font_size_pt=24,
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Slide number placeholder
@@ -822,7 +1017,7 @@ def configure_image_right_layout(layout):
     """
     spTree = layout.shapes._spTree
     
-    # Title at top
+    # Title at top, left-aligned with no indent
     add_placeholder_shape(
         spTree,
         ph_type='title',
@@ -831,7 +1026,10 @@ def configure_image_right_layout(layout):
         name="Title 1",
         font_name="Calibri Light",
         font_size_pt=44,
-        anchor='ctr'
+        anchor='ctr',
+        p_align='l',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Object placeholder on left side (narrower to make room for image)
@@ -842,7 +1040,9 @@ def configure_image_right_layout(layout):
         left=0.5, top=1.2, width=6.5, height=5.5,
         name="Content Placeholder 2",
         font_name="Calibri",
-        font_size_pt=24
+        font_size_pt=24,
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Picture placeholder on right side (from layout-specs.yaml: 7.5, 1.2, 5.33, 5.5)
@@ -872,7 +1072,7 @@ def configure_dual_image_layout(layout):
     """
     spTree = layout.shapes._spTree
     
-    # Title at top
+    # Title at top, left-aligned with no indent
     add_placeholder_shape(
         spTree,
         ph_type='title',
@@ -881,7 +1081,10 @@ def configure_dual_image_layout(layout):
         name="Title 1",
         font_name="Calibri Light",
         font_size_pt=44,
-        anchor='ctr'
+        anchor='ctr',
+        p_align='l',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Left picture placeholder (from layout-specs.yaml: 0.75, 1.2, 5.5, 4.0)
@@ -900,15 +1103,20 @@ def configure_dual_image_layout(layout):
         name="Picture Placeholder 3"
     )
     
-    # Body placeholder at bottom for captions/text
+    # Body placeholder at bottom for captions/text - center-aligned,
+    # positioned below images (~5.0" starts just below images at 5.2" with small gap)
+    # Height 1.30" keeps bottom at 6.30" which avoids footer at 6.88"
     add_placeholder_shape(
         spTree,
         ph_type='body',
         idx=3,
-        left=0.5, top=5.5, width=12.0, height=1.75,
+        left=0.5, top=5.20, width=12.0, height=1.30,
         name="Text Placeholder 4",
         font_name="Calibri",
-        font_size_pt=20
+        font_size_pt=20,
+        p_align='ctr',
+        left_margin_in=0,
+        first_line_indent_in=0
     )
     
     # Slide number placeholder

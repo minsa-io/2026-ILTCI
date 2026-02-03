@@ -9,7 +9,10 @@ paths:
   template: "templates/template.potx"
   
   # Template configuration (styling, layout, fonts)
-  template_config: "assets/template-config.yaml"
+  # template_config: "app/template-config.yaml"
+  
+  # Styling overrides (per-image border/rounding overrides)
+  styles_overrides: "assets/styles-overrides.yaml"
   
   # Content source files
   content: "content/slides_potx.md"
