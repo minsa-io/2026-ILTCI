@@ -38,7 +38,10 @@ TRACK_GREEN = RGBColor(0x3D, 0x6B, 0x38)   # #3d6b38 - Track name text
 # Asset paths
 ASSETS_DIR = "assets"
 BACKGROUND_IMAGE = os.path.join(ASSETS_DIR, "title_slide_bg_image1.png")
-LOGO_IMAGE = os.path.join(ASSETS_DIR, "rpec.png")
+LOGO_IMAGE = os.path.join(ASSETS_DIR, "title_slide_bg_image2.png")
+
+# Footer text for content layouts
+FOOTER_TEXT = "AI in Actuarial and Finance"
 
 
 def create_template():
@@ -101,6 +104,7 @@ def configure_content_master(master):
     Configure Content Master with:
     - Green header bar rectangle (#9cccb4) at top
     - Cropped logo in bottom-right corner
+    - Footer text "AI in Actuarial and Finance" bottom-left
     - Styled title placeholder in header
     - Body placeholder
     - Slide number placeholder
@@ -117,10 +121,13 @@ def configure_content_master(master):
     # Add logo with cropping in bottom-right (using XML)
     add_logo_xml(master, spTree)
     
+    # Add footer text bottom-left (using XML)
+    add_footer_text_xml(spTree)
+    
     # Add master-level placeholders (layouts will inherit)
     add_master_placeholders(master)
     
-    print("  Added header bar, logo, and master placeholders")
+    print("  Added header bar, logo, footer text, and master placeholders")
 
 
 def add_header_bar_xml(spTree):
@@ -229,6 +236,84 @@ def add_logo_xml(master, spTree):
     pic_elem = etree.fromstring(pic_xml.strip())
     spTree.append(pic_elem)
     return pic_elem
+
+
+def add_footer_text_xml(spTree):
+    """Add footer text 'AI in Actuarial and Finance' bottom-left on content master.
+    
+    Position and style match original template.pptx:
+    - Position: (0.13", 6.88"), Size: 7.12" x 0.61"
+    - Font: Calibri 18pt bold, scheme dk1 color
+    """
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
+    new_id = max(existing_ids) + 1 if existing_ids else 2
+    
+    # Position and size in EMU (from template.pptx: x=115920, y=6289200, cx=6509160, cy=559440)
+    left_emu = int(0.13 * 914400)   # ~115920
+    top_emu = int(6.88 * 914400)    # ~6289200
+    width_emu = int(7.12 * 914400)  # ~6509160
+    height_emu = int(0.61 * 914400) # ~559440
+    
+    sp_xml = f'''
+    <p:sp xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+      <p:nvSpPr>
+        <p:cNvPr id="{new_id}" name="Slide Number Placeholder 5"/>
+        <p:cNvSpPr/>
+        <p:nvPr/>
+      </p:nvSpPr>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="{left_emu}" y="{top_emu}"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+        <a:noFill/>
+        <a:ln w="0">
+          <a:noFill/>
+        </a:ln>
+      </p:spPr>
+      <p:style>
+        <a:lnRef idx="0"/>
+        <a:fillRef idx="0"/>
+        <a:effectRef idx="0"/>
+        <a:fontRef idx="minor"/>
+      </p:style>
+      <p:txBody>
+        <a:bodyPr anchor="ctr">
+          <a:noAutofit/>
+        </a:bodyPr>
+        <a:p>
+          <a:pPr defTabSz="914400">
+            <a:lnSpc>
+              <a:spcPct val="100000"/>
+            </a:lnSpc>
+          </a:pPr>
+          <a:r>
+            <a:rPr b="1" lang="en-US" sz="1800" spc="-1" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:latin typeface="Calibri"/>
+            </a:rPr>
+            <a:t>{FOOTER_TEXT}</a:t>
+          </a:r>
+          <a:endParaRPr b="0" lang="en-US" sz="1800" spc="-1" strike="noStrike">
+            <a:solidFill>
+              <a:srgbClr val="000000"/>
+            </a:solidFill>
+            <a:latin typeface="Arial"/>
+          </a:endParaRPr>
+        </a:p>
+      </p:txBody>
+    </p:sp>
+    '''
+    
+    sp_elem = etree.fromstring(sp_xml.strip())
+    spTree.append(sp_elem)
+    return sp_elem
 
 
 def add_master_placeholders(master):
@@ -532,7 +617,14 @@ def configure_title_layout(layout):
     - Full-bleed background image
     - Styled CENTER_TITLE and SUBTITLE placeholders
     - Track name textbox
+    - showMasterSp="0" to hide master shapes (header bar, footer, logo)
     """
+    # Set showMasterSp="0" on the cSld element to hide master shapes
+    # This ensures the Title layout doesn't show header bar, footer, or logo
+    cSld = layout._element.find(qn('p:cSld'))
+    if cSld is not None:
+        cSld.set('showMasterSp', '0')
+    
     spTree = layout.shapes._spTree
     
     # Add full-bleed background image first (will be at back)
