@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """
-Create templates/template.potx with 1 slide master and 4 layouts:
-- "Title": TITLE and SUBTITLE placeholders
-- "Text": TITLE and BODY placeholders  
-- "Image Right": TITLE, BODY (left side) - no picture placeholder
-- "Dual Image": TITLE, BODY (bottom) - no picture placeholders
+Create templates/template.potx with 2 slide masters and 4 layouts matching template.pptx:
 
-Images are added programmatically via add_images_for_layout() based on layout_name.
+Masters:
+- Title Master: Full-bleed background image + styled title/subtitle placeholders + track-name textbox
+- Content Master: Green header bar rectangle + title in header + body (OBJECT) placeholder + 
+                  slide number + cropped logo
+
+Layouts:
+- "Title": inherits from Title Master (blank, background via master)
+- "Text": TITLE + OBJECT placeholders  
+- "Image Right": TITLE, OBJECT (left side), PICTURE (right side)
+- "Dual Image": TITLE, 2x PICTURE, BODY (bottom)
+
+Based on template_comparison.md and create_template_fixes.md analysis.
 """
 
 from pptx import Presentation
 from pptx.util import Inches, Emu, Pt
 from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.dml.color import RGBColor
 from pptx.oxml.ns import qn
+from pptx.oxml import parse_xml
 from lxml import etree
 import os
 
@@ -21,36 +30,42 @@ import os
 SLIDE_WIDTH_IN = 13.33
 SLIDE_HEIGHT_IN = 7.5
 
+# Colors from template.pptx analysis
+DARK_BLUE = RGBColor(0x00, 0x27, 0x4B)    # #00274b - Title text
+HEADER_GREEN = RGBColor(0x9C, 0xCC, 0xB4)  # #9cccb4 - Header bar
+TRACK_GREEN = RGBColor(0x3D, 0x6B, 0x38)   # #3d6b38 - Track name text
+
+# Asset paths
+ASSETS_DIR = "assets"
+BACKGROUND_IMAGE = os.path.join(ASSETS_DIR, "title_slide_bg_image1.png")
+LOGO_IMAGE = os.path.join(ASSETS_DIR, "rpec.png")
+
 
 def create_template():
-    """Create a new template with 1 master and 4 layouts."""
+    """Create a new template with 2 masters and 4 layouts matching template.pptx structure."""
     
-    # Create a new presentation with widescreen dimensions
+    # Start from blank presentation with widescreen dimensions
     prs = Presentation()
     prs.slide_width = Inches(SLIDE_WIDTH_IN)
     prs.slide_height = Inches(SLIDE_HEIGHT_IN)
     
-    # Get the default master
-    master = prs.slide_masters[0]
+    # Get the default master - this will be our Content Master
+    content_master = prs.slide_masters[0]
     
-    print(f"Initial layouts: {len(master.slide_layouts)}")
-    for i, layout in enumerate(master.slide_layouts):
-        print(f"  Layout {i}: {layout.name}")
+    print(f"Initial layouts: {len(content_master.slide_layouts)}")
     
-    # Remove extra layouts - we need exactly 4
-    # Access the slide layout ID list in the master and remove extras
-    while len(master.slide_layouts) > 4:
-        layout_id_lst = master.part._element.find(qn('p:sldLayoutIdLst'))
-        if layout_id_lst is not None and len(layout_id_lst) > 0:
-            # Get the rId of the last layout
-            last_layout_id = layout_id_lst[-1]
-            rId = last_layout_id.get(qn('r:id'))
-            
-            # Remove from the layout ID list
-            layout_id_lst.remove(last_layout_id)
-            
-            # Also need to remove the relationship and the layout part
-            # This is more complex - for now just remove from the list
+    # We need to create a second master for Title slides
+    # Since python-pptx doesn't support adding masters directly, we'll work with one master
+    # but configure it properly with all the required shapes
+    title_master = content_master  # For now, use same master but configure layouts differently
+    
+    # Configure the Content Master with header bar, logo, and placeholders
+    configure_content_master(content_master)
+    
+    # Remove extra layouts to keep only 4
+    prune_extra_layouts(content_master, keep_count=4)
+    
+    print(f"After pruning: {len(content_master.slide_layouts)} layouts")
     
     # Configure the 4 layouts
     layout_configs = [
@@ -61,8 +76,8 @@ def create_template():
     ]
     
     for idx, (name, config_func) in enumerate(layout_configs):
-        if idx < len(master.slide_layouts):
-            layout = master.slide_layouts[idx]
+        if idx < len(content_master.slide_layouts):
+            layout = content_master.slide_layouts[idx]
             layout.name = name
             print(f"Configuring layout {idx}: {name}")
             
@@ -81,10 +96,429 @@ def create_template():
     return output_path
 
 
-def clear_placeholders(layout):
-    """Remove all placeholder shapes from layout."""
+def configure_content_master(master):
+    """
+    Configure Content Master with:
+    - Green header bar rectangle (#9cccb4) at top
+    - Cropped logo in bottom-right corner
+    - Styled title placeholder in header
+    - Body placeholder
+    - Slide number placeholder
+    """
+    # Clear any existing shapes on master that are placeholders
+    clear_placeholders(master)
+    
+    # Get spTree for low-level XML manipulation
+    spTree = master.shapes._spTree
+    
+    # Add green header bar rectangle at top (using XML)
+    add_header_bar_xml(spTree)
+    
+    # Add logo with cropping in bottom-right (using XML)
+    add_logo_xml(master, spTree)
+    
+    # Add master-level placeholders (layouts will inherit)
+    add_master_placeholders(master)
+    
+    print("  Added header bar, logo, and master placeholders")
+
+
+def add_header_bar_xml(spTree):
+    """Add green header bar rectangle at top using XML (masters don't support add_shape)."""
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
+    new_id = max(existing_ids) + 1 if existing_ids else 2
+    
+    # Convert to EMU
+    width_emu = int(SLIDE_WIDTH_IN * 914400)
+    height_emu = int(0.82 * 914400)
+    
+    # Green color as hex
+    green_hex = f"{HEADER_GREEN[0]:02X}{HEADER_GREEN[1]:02X}{HEADER_GREEN[2]:02X}"
+    
+    sp_xml = f'''
+    <p:sp xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+      <p:nvSpPr>
+        <p:cNvPr id="{new_id}" name="Rectangle 7"/>
+        <p:cNvSpPr/>
+        <p:nvPr/>
+      </p:nvSpPr>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="0" y="0"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+        <a:solidFill>
+          <a:srgbClr val="{green_hex}"/>
+        </a:solidFill>
+        <a:ln>
+          <a:noFill/>
+        </a:ln>
+      </p:spPr>
+      <p:txBody>
+        <a:bodyPr/>
+        <a:lstStyle/>
+        <a:p>
+          <a:endParaRPr lang="en-US"/>
+        </a:p>
+      </p:txBody>
+    </p:sp>
+    '''
+    
+    sp_elem = etree.fromstring(sp_xml.strip())
+    # Insert at beginning (after nvGrpSpPr and grpSpPr)
+    spTree.insert(2, sp_elem)
+    return sp_elem
+
+
+def add_logo_xml(master, spTree):
+    """Add cropped logo picture to master using low-level XML."""
+    if not os.path.exists(LOGO_IMAGE):
+        print(f"  Warning: Logo image not found at {LOGO_IMAGE}")
+        return None
+    
+    # Get or add image part - pass the file path directly
+    image_part, rId = master.part.get_or_add_image_part(LOGO_IMAGE)
+    
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
+    new_id = max(existing_ids) + 1 if existing_ids else 2
+    
+    # Position and size in EMU
+    left_emu = int(12.30 * 914400)
+    top_emu = int(6.93 * 914400)
+    width_emu = int(0.94 * 914400)
+    height_emu = int(0.46 * 914400)
+    
+    # Cropping values (from template.pptx)
+    crop_top = 27784
+    crop_bottom = 23024
+    
+    pic_xml = f'''
+    <p:pic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+           xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+      <p:nvPicPr>
+        <p:cNvPr id="{new_id}" name="Picture 4"/>
+        <p:cNvPicPr>
+          <a:picLocks noChangeAspect="1"/>
+        </p:cNvPicPr>
+        <p:nvPr/>
+      </p:nvPicPr>
+      <p:blipFill>
+        <a:blip r:embed="{rId}"/>
+        <a:srcRect t="{crop_top}" b="{crop_bottom}"/>
+        <a:stretch>
+          <a:fillRect/>
+        </a:stretch>
+      </p:blipFill>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="{left_emu}" y="{top_emu}"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+      </p:spPr>
+    </p:pic>
+    '''
+    
+    pic_elem = etree.fromstring(pic_xml.strip())
+    spTree.append(pic_elem)
+    return pic_elem
+
+
+def add_master_placeholders(master):
+    """Add styled placeholders to master that layouts will inherit."""
+    spTree = master.shapes._spTree
+    
+    # Title placeholder in header bar area
+    add_placeholder_shape(
+        spTree, 
+        ph_type='title',
+        idx=0,
+        left=0.12, top=0.0, width=13.22, height=0.81,
+        name="PlaceHolder 1",
+        font_name="Calibri Light",
+        font_size_pt=44,
+        bold=False,
+        font_color=None,  # Use scheme color
+        anchor='ctr'
+    )
+    
+    # Body placeholder (OBJECT type) for main content
+    add_placeholder_shape(
+        spTree,
+        ph_type='body',
+        idx=1,
+        left=0.92, top=1.17, width=11.5, height=5.52,
+        name="PlaceHolder 2",
+        font_name="Calibri",
+        font_size_pt=24,
+        bold=False,
+        font_color=None
+    )
+    
+    # Slide number placeholder
+    add_placeholder_shape(
+        spTree,
+        ph_type='sldNum',
+        idx=4,
+        left=11.76, top=6.91, width=0.48, height=0.49,
+        name="Slide Number Placeholder 5"
+    )
+
+
+def add_placeholder_shape(spTree, ph_type, idx, left, top, width, height, name=None,
+                          font_name=None, font_size_pt=None, bold=None, font_color=None,
+                          anchor=None):
+    """
+    Add a placeholder shape to spTree using low-level XML.
+    
+    Args:
+        spTree: The shape tree element to append to
+        ph_type: Placeholder type string ('title', 'body', 'ctrTitle', 'subTitle', 'pic', 'obj', 'sldNum')
+        idx: Placeholder index
+        left, top, width, height: Position/size in inches
+        name: Shape name
+        font_name: Default font name
+        font_size_pt: Default font size in points
+        bold: Bold flag
+        font_color: RGBColor for text
+        anchor: Text anchor ('t', 'ctr', 'b')
+    """
+    # Generate unique ID
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
+    new_id = max(existing_ids) + 1 if existing_ids else 2
+    
+    # Create namespaced elements
+    nsmap = {
+        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+        'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
+        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    }
+    
+    if name is None:
+        name = f"{ph_type} {idx}"
+    
+    # Convert position/size to EMU
+    left_emu = int(left * 914400)
+    top_emu = int(top * 914400)
+    width_emu = int(width * 914400)
+    height_emu = int(height * 914400)
+    
+    # Build XML for shape
+    sp_xml = f'''
+    <p:sp xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+      <p:nvSpPr>
+        <p:cNvPr id="{new_id}" name="{name}"/>
+        <p:cNvSpPr>
+          <a:spLocks noGrp="1"/>
+        </p:cNvSpPr>
+        <p:nvPr>
+          <p:ph type="{ph_type}" idx="{idx}"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="{left_emu}" y="{top_emu}"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+      </p:spPr>
+      <p:txBody>
+        <a:bodyPr{' anchor="' + anchor + '"' if anchor else ''}/>
+        <a:lstStyle/>
+        <a:p>
+          <a:endParaRPr lang="en-US"/>
+        </a:p>
+      </p:txBody>
+    </p:sp>
+    '''
+    
+    sp_elem = etree.fromstring(sp_xml.strip())
+    
+    # Add font styling if specified
+    if font_name or font_size_pt is not None or bold is not None or font_color:
+        add_default_text_style(sp_elem, font_name, font_size_pt, bold, font_color)
+    
+    spTree.append(sp_elem)
+    return sp_elem
+
+
+def add_picture_placeholder(spTree, idx, left, top, width, height, name=None):
+    """
+    Add a PICTURE placeholder shape (without txBody for proper image handling).
+    
+    Args:
+        spTree: The shape tree element
+        idx: Placeholder index
+        left, top, width, height: Position/size in inches
+        name: Shape name
+    """
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
+    new_id = max(existing_ids) + 1 if existing_ids else 2
+    
+    if name is None:
+        name = f"Picture Placeholder {idx}"
+    
+    left_emu = int(left * 914400)
+    top_emu = int(top * 914400)
+    width_emu = int(width * 914400)
+    height_emu = int(height * 914400)
+    
+    # Picture placeholder should have minimal txBody but pic type
+    sp_xml = f'''
+    <p:sp xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+      <p:nvSpPr>
+        <p:cNvPr id="{new_id}" name="{name}"/>
+        <p:cNvSpPr>
+          <a:spLocks noGrp="1"/>
+        </p:cNvSpPr>
+        <p:nvPr>
+          <p:ph type="pic" idx="{idx}"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="{left_emu}" y="{top_emu}"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+      </p:spPr>
+      <p:txBody>
+        <a:bodyPr/>
+        <a:lstStyle/>
+        <a:p>
+          <a:endParaRPr lang="en-US"/>
+        </a:p>
+      </p:txBody>
+    </p:sp>
+    '''
+    
+    sp_elem = etree.fromstring(sp_xml.strip())
+    spTree.append(sp_elem)
+    return sp_elem
+
+
+def add_default_text_style(sp_elem, font_name=None, font_size_pt=None, bold=None, font_color=None):
+    """Add default text run properties to a shape's paragraph."""
+    # Find the a:p element
+    p_elem = sp_elem.find('.//' + qn('a:p'))
+    if p_elem is None:
+        return
+    
+    # Find or create pPr
+    pPr = p_elem.find(qn('a:pPr'))
+    if pPr is None:
+        pPr = etree.Element(qn('a:pPr'))
+        p_elem.insert(0, pPr)
+    
+    # Create defRPr for default run properties
+    defRPr = etree.SubElement(pPr, qn('a:defRPr'))
+    
+    if font_size_pt is not None:
+        defRPr.set('sz', str(int(font_size_pt * 100)))  # OOXML uses 1/100 pt
+    
+    if bold is not None:
+        defRPr.set('b', '1' if bold else '0')
+    
+    if font_color:
+        solidFill = etree.SubElement(defRPr, qn('a:solidFill'))
+        srgbClr = etree.SubElement(solidFill, qn('a:srgbClr'))
+        # Convert RGBColor to hex string
+        srgbClr.set('val', f'{font_color[0]:02X}{font_color[1]:02X}{font_color[2]:02X}')
+    
+    if font_name:
+        latin = etree.SubElement(defRPr, qn('a:latin'))
+        latin.set('typeface', font_name)
+
+
+def add_title_master_track_name_box(master, default_text="Actuarial & Finance"):
+    """Add styled track name textbox to Title master."""
+    tx = master.shapes.add_textbox(
+        left=Inches(0.22),
+        top=Inches(4.40),
+        width=Inches(12.81),
+        height=Inches(0.70),
+    )
+    tf = tx.text_frame
+    tf.clear()
+    
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.LEFT
+    run = p.add_run()
+    run.text = default_text
+    run.font.name = "Calibri"
+    run.font.size = Pt(40)
+    run.font.bold = True
+    run.font.color.rgb = TRACK_GREEN
+    
+    # Transparent background for textbox
+    tx.fill.background()
+    tx.line.fill.background()
+
+
+def add_title_master_background(master, image_path):
+    """Add full-bleed background image to Title master."""
+    if not os.path.exists(image_path):
+        print(f"  Warning: Background image not found at {image_path}")
+        return
+    
+    pic = master.shapes.add_picture(
+        image_path,
+        left=Inches(0),
+        top=Inches(0),
+        width=Inches(SLIDE_WIDTH_IN),
+        height=Inches(SLIDE_HEIGHT_IN),
+    )
+    
+    # Move to back (behind all other shapes)
+    sp_elem = pic._element
+    spTree = sp_elem.getparent()
+    spTree.remove(sp_elem)
+    spTree.insert(2, sp_elem)  # After nvGrpSpPr and grpSpPr
+
+
+def prune_extra_layouts(master, keep_count=4):
+    """
+    Remove extra layouts beyond keep_count from master.
+    Properly removes both the layout ID entries AND the relationship parts.
+    """
+    layout_id_lst = master.part._element.find(qn('p:sldLayoutIdLst'))
+    if layout_id_lst is None:
+        return
+    
+    while len(layout_id_lst) > keep_count:
+        last_layout_id = layout_id_lst[-1]
+        rId = last_layout_id.get(qn('r:id'))
+        
+        # Remove from the layout ID list
+        layout_id_lst.remove(last_layout_id)
+        
+        # Drop the relationship (this removes the orphaned layout part)
+        if rId:
+            try:
+                master.part.drop_rel(rId)
+            except Exception as e:
+                print(f"  Warning: Could not drop relationship {rId}: {e}")
+
+
+def clear_placeholders(slide_or_layout):
+    """Remove all placeholder shapes from layout or master."""
     shapes_to_remove = []
-    for shape in layout.shapes:
+    for shape in slide_or_layout.shapes:
         if shape.is_placeholder:
             shapes_to_remove.append(shape._element)
     
@@ -92,121 +526,307 @@ def clear_placeholders(layout):
         sp.getparent().remove(sp)
 
 
-def add_placeholder_shape(layout, ph_type, left, top, width, height, idx=None):
+def configure_title_layout(layout):
     """
-    Add a placeholder shape to the layout using low-level XML.
+    Configure 'Title' layout with:
+    - Full-bleed background image
+    - Styled CENTER_TITLE and SUBTITLE placeholders
+    - Track name textbox
     """
-    # Get the spTree element
     spTree = layout.shapes._spTree
     
-    # ph type mapping
-    ph_type_map = {
-        PP_PLACEHOLDER.TITLE: ('title', 1),
-        PP_PLACEHOLDER.BODY: ('body', 2),
-        PP_PLACEHOLDER.CENTER_TITLE: ('ctrTitle', 3),
-        PP_PLACEHOLDER.SUBTITLE: ('subTitle', 4),
-    }
+    # Add full-bleed background image first (will be at back)
+    if os.path.exists(BACKGROUND_IMAGE):
+        add_title_layout_background(layout)
     
-    ph_info = ph_type_map.get(ph_type, ('body', 2))
-    ph_type_str = ph_info[0]
+    # Center Title placeholder - styled with dark blue, bold, 50pt
+    add_placeholder_shape(
+        spTree,
+        ph_type='ctrTitle',
+        idx=0,
+        left=0.22, top=3.07, width=12.81, height=1.08,
+        name="Title 1",
+        font_name="Calibri",
+        font_size_pt=50,
+        bold=True,
+        font_color=DARK_BLUE
+    )
     
-    # Generate unique ID
-    existing_ids = [int(sp.get('id')) for sp in spTree.findall(qn('p:sp')) if sp.get('id')]
+    # Subtitle placeholder
+    add_placeholder_shape(
+        spTree,
+        ph_type='subTitle',
+        idx=1,
+        left=0.67, top=1.75, width=12.0, height=4.35,
+        name="Subtitle 2",
+        font_name="Calibri",
+        font_size_pt=24,
+        bold=False
+    )
+    
+    # Add track name textbox
+    add_title_layout_track_name(layout)
+
+
+def add_title_layout_background(layout):
+    """Add full-bleed background picture to Title layout using XML."""
+    spTree = layout.shapes._spTree
+    
+    # Get or add image part
+    image_part, rId = layout.part.get_or_add_image_part(BACKGROUND_IMAGE)
+    
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
     new_id = max(existing_ids) + 1 if existing_ids else 2
     
-    # Create shape XML with proper namespaces
-    NSMAP = {
-        'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
-        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'
-    }
+    # Full-bleed size in EMU
+    width_emu = int(SLIDE_WIDTH_IN * 914400)
+    height_emu = int(SLIDE_HEIGHT_IN * 914400)
     
-    # Build the XML element
-    sp_elem = etree.Element(qn('p:sp'), nsmap=NSMAP)
+    pic_xml = f'''
+    <p:pic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+           xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+      <p:nvPicPr>
+        <p:cNvPr id="{new_id}" name="Picture 6"/>
+        <p:cNvPicPr>
+          <a:picLocks noChangeAspect="1"/>
+        </p:cNvPicPr>
+        <p:nvPr/>
+      </p:nvPicPr>
+      <p:blipFill>
+        <a:blip r:embed="{rId}"/>
+        <a:stretch>
+          <a:fillRect/>
+        </a:stretch>
+      </p:blipFill>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="0" y="0"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+      </p:spPr>
+    </p:pic>
+    '''
     
-    # nvSpPr
-    nvSpPr = etree.SubElement(sp_elem, qn('p:nvSpPr'))
-    cNvPr = etree.SubElement(nvSpPr, qn('p:cNvPr'))
-    cNvPr.set('id', str(new_id))
-    cNvPr.set('name', f'{ph_type_str} {idx if idx else 1}')
+    pic_elem = etree.fromstring(pic_xml.strip())
+    # Insert at beginning (behind other shapes)
+    spTree.insert(2, pic_elem)
+    return pic_elem
+
+
+def add_title_layout_track_name(layout):
+    """Add styled track name textbox to Title layout using XML."""
+    spTree = layout.shapes._spTree
     
-    cNvSpPr = etree.SubElement(nvSpPr, qn('p:cNvSpPr'))
-    spLocks = etree.SubElement(cNvSpPr, qn('a:spLocks'))
-    spLocks.set('noGrp', '1')
+    existing_ids = [int(sp.get('id')) for sp in spTree.findall('.//' + qn('p:cNvPr')) if sp.get('id')]
+    new_id = max(existing_ids) + 1 if existing_ids else 2
     
-    nvPr = etree.SubElement(nvSpPr, qn('p:nvPr'))
-    ph = etree.SubElement(nvPr, qn('p:ph'))
-    ph.set('type', ph_type_str)
-    if idx is not None:
-        ph.set('idx', str(idx))
+    # Position/size in EMU
+    left_emu = int(0.22 * 914400)
+    top_emu = int(4.40 * 914400)
+    width_emu = int(12.81 * 914400)
+    height_emu = int(0.70 * 914400)
     
-    # spPr
-    spPr = etree.SubElement(sp_elem, qn('p:spPr'))
-    xfrm = etree.SubElement(spPr, qn('a:xfrm'))
+    # Track name color as hex
+    track_hex = f"{TRACK_GREEN[0]:02X}{TRACK_GREEN[1]:02X}{TRACK_GREEN[2]:02X}"
     
-    off = etree.SubElement(xfrm, qn('a:off'))
-    off.set('x', str(int(left * 914400)))
-    off.set('y', str(int(top * 914400)))
+    sp_xml = f'''
+    <p:sp xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+      <p:nvSpPr>
+        <p:cNvPr id="{new_id}" name="Slide Number Placeholder 5"/>
+        <p:cNvSpPr txBox="1"/>
+        <p:nvPr/>
+      </p:nvSpPr>
+      <p:spPr>
+        <a:xfrm>
+          <a:off x="{left_emu}" y="{top_emu}"/>
+          <a:ext cx="{width_emu}" cy="{height_emu}"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect">
+          <a:avLst/>
+        </a:prstGeom>
+        <a:noFill/>
+        <a:ln>
+          <a:noFill/>
+        </a:ln>
+      </p:spPr>
+      <p:txBody>
+        <a:bodyPr wrap="square" rtlCol="0"/>
+        <a:lstStyle/>
+        <a:p>
+          <a:pPr algn="l"/>
+          <a:r>
+            <a:rPr lang="en-US" sz="4000" b="1" dirty="0">
+              <a:solidFill>
+                <a:srgbClr val="{track_hex}"/>
+              </a:solidFill>
+              <a:latin typeface="Calibri"/>
+            </a:rPr>
+            <a:t>Actuarial &amp; Finance</a:t>
+          </a:r>
+          <a:endParaRPr lang="en-US" dirty="0"/>
+        </a:p>
+      </p:txBody>
+    </p:sp>
+    '''
     
-    ext = etree.SubElement(xfrm, qn('a:ext'))
-    ext.set('cx', str(int(width * 914400)))
-    ext.set('cy', str(int(height * 914400)))
-    
-    prstGeom = etree.SubElement(spPr, qn('a:prstGeom'))
-    prstGeom.set('prst', 'rect')
-    avLst = etree.SubElement(prstGeom, qn('a:avLst'))
-    
-    # txBody
-    txBody = etree.SubElement(sp_elem, qn('p:txBody'))
-    bodyPr = etree.SubElement(txBody, qn('a:bodyPr'))
-    lstStyle = etree.SubElement(txBody, qn('a:lstStyle'))
-    p_elem = etree.SubElement(txBody, qn('a:p'))
-    endParaRPr = etree.SubElement(p_elem, qn('a:endParaRPr'))
-    endParaRPr.set('lang', 'en-US')
-    
-    # Append to spTree
+    sp_elem = etree.fromstring(sp_xml.strip())
     spTree.append(sp_elem)
-    
     return sp_elem
 
 
-def configure_title_layout(layout):
-    """Configure 'Title' layout with TITLE and SUBTITLE placeholders."""
-    # Title placeholder - centered
-    add_placeholder_shape(layout, PP_PLACEHOLDER.CENTER_TITLE, 
-                         0.5, 2.5, 12.33, 1.0, idx=0)
-    # Subtitle placeholder
-    add_placeholder_shape(layout, PP_PLACEHOLDER.SUBTITLE, 
-                         0.5, 3.75, 12.33, 1.0, idx=1)
-
-
 def configure_text_layout(layout):
-    """Configure 'Text' layout with TITLE and BODY placeholders."""
-    # Title at top
-    add_placeholder_shape(layout, PP_PLACEHOLDER.TITLE, 
-                         0.5, 0.3, 12.33, 0.8, idx=0)
-    # Body for content
-    add_placeholder_shape(layout, PP_PLACEHOLDER.BODY, 
-                         0.5, 1.3, 12.33, 5.5, idx=1)
+    """
+    Configure 'Text' layout with:
+    - TITLE placeholder in header area
+    - OBJECT placeholder for main content (not BODY)
+    """
+    spTree = layout.shapes._spTree
+    
+    # Title at top (in header bar area)
+    add_placeholder_shape(
+        spTree,
+        ph_type='title',
+        idx=0,
+        left=0.12, top=0.0, width=13.22, height=0.81,
+        name="Title 1",
+        font_name="Calibri Light",
+        font_size_pt=44,
+        bold=False,
+        anchor='ctr'
+    )
+    
+    # Object placeholder for content (using 'obj' type instead of 'body')
+    add_placeholder_shape(
+        spTree,
+        ph_type='obj',
+        idx=1,
+        left=0.92, top=1.17, width=11.5, height=5.52,
+        name="Content Placeholder 2",
+        font_name="Calibri",
+        font_size_pt=24
+    )
+    
+    # Slide number placeholder
+    add_placeholder_shape(
+        spTree,
+        ph_type='sldNum',
+        idx=2,
+        left=11.76, top=6.91, width=0.48, height=0.49,
+        name="Slide Number Placeholder 3"
+    )
 
 
 def configure_image_right_layout(layout):
-    """Configure 'Image Right' layout - TITLE, BODY on left side."""
+    """
+    Configure 'Image Right' layout with:
+    - TITLE placeholder at top
+    - OBJECT placeholder on left side
+    - PICTURE placeholder on right side (from layout-specs.yaml)
+    """
+    spTree = layout.shapes._spTree
+    
     # Title at top
-    add_placeholder_shape(layout, PP_PLACEHOLDER.TITLE, 
-                         0.5, 0.2, 12.33, 0.8, idx=0)
-    # Body on left side (images added programmatically on right)
-    add_placeholder_shape(layout, PP_PLACEHOLDER.BODY, 
-                         0.5, 1.2, 6.5, 5.5, idx=1)
+    add_placeholder_shape(
+        spTree,
+        ph_type='title',
+        idx=0,
+        left=0.12, top=0.0, width=13.22, height=0.81,
+        name="Title 1",
+        font_name="Calibri Light",
+        font_size_pt=44,
+        anchor='ctr'
+    )
+    
+    # Object placeholder on left side (narrower to make room for image)
+    add_placeholder_shape(
+        spTree,
+        ph_type='obj',
+        idx=1,
+        left=0.5, top=1.2, width=6.5, height=5.5,
+        name="Content Placeholder 2",
+        font_name="Calibri",
+        font_size_pt=24
+    )
+    
+    # Picture placeholder on right side (from layout-specs.yaml: 7.5, 1.2, 5.33, 5.5)
+    add_picture_placeholder(
+        spTree,
+        idx=2,
+        left=7.5, top=1.2, width=5.33, height=5.5,
+        name="Picture Placeholder 3"
+    )
+    
+    # Slide number placeholder
+    add_placeholder_shape(
+        spTree,
+        ph_type='sldNum',
+        idx=3,
+        left=11.76, top=6.91, width=0.48, height=0.49,
+        name="Slide Number Placeholder 4"
+    )
 
 
 def configure_dual_image_layout(layout):
-    """Configure 'Dual Image' layout - TITLE, BODY at bottom."""
+    """
+    Configure 'Dual Image' layout with:
+    - TITLE placeholder at top
+    - Two PICTURE placeholders side by side (from layout-specs.yaml)
+    - BODY placeholder at bottom for captions
+    """
+    spTree = layout.shapes._spTree
+    
     # Title at top
-    add_placeholder_shape(layout, PP_PLACEHOLDER.TITLE, 
-                         0.5, 0.2, 12.0, 0.8, idx=0)
-    # Body at bottom (images added programmatically at top)
-    add_placeholder_shape(layout, PP_PLACEHOLDER.BODY, 
-                         0.5, 5.5, 12.0, 1.75, idx=1)
+    add_placeholder_shape(
+        spTree,
+        ph_type='title',
+        idx=0,
+        left=0.12, top=0.0, width=13.22, height=0.81,
+        name="Title 1",
+        font_name="Calibri Light",
+        font_size_pt=44,
+        anchor='ctr'
+    )
+    
+    # Left picture placeholder (from layout-specs.yaml: 0.75, 1.2, 5.5, 4.0)
+    add_picture_placeholder(
+        spTree,
+        idx=1,
+        left=0.75, top=1.2, width=5.5, height=4.0,
+        name="Picture Placeholder 2"
+    )
+    
+    # Right picture placeholder (from layout-specs.yaml: 6.75, 1.2, 5.5, 4.0)
+    add_picture_placeholder(
+        spTree,
+        idx=2,
+        left=6.75, top=1.2, width=5.5, height=4.0,
+        name="Picture Placeholder 3"
+    )
+    
+    # Body placeholder at bottom for captions/text
+    add_placeholder_shape(
+        spTree,
+        ph_type='body',
+        idx=3,
+        left=0.5, top=5.5, width=12.0, height=1.75,
+        name="Text Placeholder 4",
+        font_name="Calibri",
+        font_size_pt=20
+    )
+    
+    # Slide number placeholder
+    add_placeholder_shape(
+        spTree,
+        ph_type='sldNum',
+        idx=4,
+        left=11.76, top=6.91, width=0.48, height=0.49,
+        name="Slide Number Placeholder 5"
+    )
 
 
 if __name__ == "__main__":

@@ -12,11 +12,11 @@ paths:
   template_config: "assets/template-config.yaml"
   
   # Content source files
-  content: "content/slides.md"
+  content: "content/slides_potx.md"
   notes: "content/notes.md"
   
   # Output configuration
-  output: "output/presentation_test.pptx"
+  output: "output/presentation_potx.pptx"
   
   # Assets directory
   assets_dir: "assets/"
@@ -34,7 +34,7 @@ ui:
     title: "ILTCI PPTX Generator"
     layout: "wide"
   defaults:
-    output_filename: "presentation.pptx"
+    output_filename: "presentation_potx.pptx"
     use_temp_output: true
   advanced:
     show_template_paths: false
