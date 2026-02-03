@@ -52,7 +52,11 @@ class PresentationGenerator:
             self._registry = load_layout_registry(self.config.template_path)
         return self._registry
     
-    def generate(self, template_override: Optional[Path] = None) -> None:
+    def generate(
+        self,
+        template_override: Optional[Path] = None,
+        style_overrides: Optional[dict] = None
+    ) -> None:
         """Generate the PowerPoint presentation from markdown content.
         
         Uses the new generic pipeline:

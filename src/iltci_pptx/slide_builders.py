@@ -89,7 +89,7 @@ def populate_slide(
         >>> slide = build_slide("Title and Content", prs, registry)
         >>> populate_slide(slide, slide_data, config, registry)
     """
-    # Handle images using config-driven layout specs
+    # Handle images using PICTURE placeholders from the template
     if data.images:
         if registry is None:
             logger.warning(

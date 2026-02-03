@@ -26,7 +26,7 @@ from .slide_builders import (
     build_rich_content,
 )
 from .images import (
-    get_layout_spec_names,
+    get_picture_placeholders,
     add_images_for_layout,
 )
 
@@ -53,6 +53,6 @@ __all__ = [
     "populate_slide",
     "build_rich_content",
     # Image handling
-    "get_layout_spec_names",
+    "get_picture_placeholders",
     "add_images_for_layout",
 ]
