@@ -1,0 +1,40 @@
+# Configuration for 2026 ILTCI Presentation Generator
+
+paths:
+  # Project root relative to this config file
+  project_root: ".."
+  
+  # Template PowerPoint file
+  template: "templates/template.potx"
+  
+  # Styling overrides
+  styles_overrides: "configs/style-overrides.yaml"
+  
+  # Content source files
+  content: "content/slides.md"
+  
+  # Assets directory
+  assets_dir: "assets/"
+
+  # Output configuration
+  output: "output/presentation.pptx"
+
+settings:
+  # Overwrite existing output file
+  overwrite_output: true
+  
+  # Logging configuration
+  logging:
+    level: "INFO"
+
+# default configuration for the UI
+ui:
+  page:
+    title: "ILTCI PPTX Generator"
+    layout: "wide"
+  defaults:
+    output_filename: "presentation.pptx"
+    use_temp_output: true
+  advanced:
+    show_template_paths: false
+  style_overrides_mode: "default"
