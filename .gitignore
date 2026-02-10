@@ -49,7 +49,7 @@ env/
 # Output files (generated presentations)
 output/
 *.pptx
-!templates/template.pptx
+!templates/template.potx
 
 # Temporary files
 *.tmp

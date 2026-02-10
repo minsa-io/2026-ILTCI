@@ -41,6 +41,11 @@ def parse_arguments() -> argparse.Namespace:
         help='Path to output PowerPoint file (overrides config)'
     )
     
+    parser.add_argument(
+        '--assets-dir',
+        help='Path to assets directory (overrides config)'
+    )
+    
     return parser.parse_args()
 
 
@@ -72,6 +77,8 @@ def main() -> int:
         config._config['paths']['content'] = args.content
     if args.output:
         config._config['paths']['output'] = args.output
+    if args.assets_dir:
+        config._config['paths']['assets_dir'] = args.assets_dir
     
     # Print banner and configuration
     print("=" * 60)
@@ -80,6 +87,7 @@ def main() -> int:
     print(f"Configuration: {args.config}")
     print(f"Template:      {config.template_path}")
     print(f"Content:       {config.content_path}")
+    print(f"Assets:        {config.assets_dir}")
     print(f"Output:        {config.output_path}")
     print("=" * 60)
     

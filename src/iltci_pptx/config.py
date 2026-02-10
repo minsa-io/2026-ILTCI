@@ -12,7 +12,8 @@ def load_yaml_file(file_path: Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"Configuration file not found: {file_path}")
     
     with open(file_path, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+        return data if data is not None else {}
 
 
 def merge_dicts(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,7 +82,7 @@ class Config:
         
         # Load and merge with template config if available
         template_config_path = config._resolve_path_value(paths_config.get('template_config', ''))
-        if template_config_path and template_config_path.exists():
+        if template_config_path.is_file():
             template_config = load_yaml_file(template_config_path)
             config._config = merge_dicts(template_config, main_config)
         else:
@@ -89,6 +90,16 @@ class Config:
         
         # Update internal paths reference after merge
         config._paths = config._config.get('paths', {})
+        
+        # Load styles overrides if present (highest precedence)
+        styles_overrides_path = config._resolve_path_value(
+            config._paths.get('styles_overrides', '')
+        )
+        
+        if styles_overrides_path.is_file():
+            styles_overrides = load_yaml_file(styles_overrides_path)
+            config._config = merge_dicts(config._config, styles_overrides)
+            logging.debug(f"Loaded styles overrides from: {styles_overrides_path}")
         
         config._setup_logging()
         config.validate_paths()
@@ -111,7 +122,12 @@ class Config:
         return p.resolve()
     
     def _load_configuration(self, main_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Load and merge both configuration files.
+        """Load and merge configuration files.
+        
+        Merge order (each layer overrides the previous):
+        1. template_config (base)
+        2. main_config (overlays template)
+        3. styles_overrides (highest precedence for image_styles.per_image_src)
         
         Args:
             main_config: Already loaded main configuration dictionary
@@ -124,7 +140,7 @@ class Config:
             main_config.get('paths', {}).get('template_config', '')
         )
         
-        if template_config_path and template_config_path.exists():
+        if template_config_path.is_file():
             template_config = load_yaml_file(template_config_path)
             # Merge configurations (template config is the base, main config overlays)
             merged = merge_dicts(template_config, main_config)
@@ -136,6 +152,16 @@ class Config:
         
         logging.debug(f"Loaded main config from: {self.config_path}")
         logging.debug(f"Loaded template config from: {template_config_path}")
+        
+        # Load styles overrides if present (highest precedence)
+        styles_overrides_path = self._resolve_path_value(
+            self._paths.get('styles_overrides', '')
+        )
+        
+        if styles_overrides_path.is_file():
+            styles_overrides = load_yaml_file(styles_overrides_path)
+            merged = merge_dicts(merged, styles_overrides)
+            logging.debug(f"Loaded styles overrides from: {styles_overrides_path}")
         
         return merged
     
@@ -221,3 +247,11 @@ class Config:
     def assets_dir(self) -> Path:
         """Get assets directory path."""
         return self.get_path('assets_dir')
+    
+    @property
+    def image_styles(self) -> Dict[str, Any]:
+        """Get image style settings from config.
+        
+        Returns settings for image borders, rounded corners, etc.
+        """
+        return self.get('image_styles', {})
