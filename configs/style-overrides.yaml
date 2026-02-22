@@ -93,6 +93,9 @@ spacing:
 
 image_styles:
   per_image_src:
+    agents-vs-code-annotated.png:
+      border_enabled: false
+      rounded_enabled: false
     git-jj.png:
       border_enabled: false
       rounded_enabled: false
@@ -101,7 +104,7 @@ image_styles:
       rounded_enabled: false
     menugen-upload.png:
       rounded_enabled: false
-    menugen-images.png:
+    menugen-output.png:
       rounded_enabled: false
     minesweeper-analysis.png:
       rounded_enabled: false

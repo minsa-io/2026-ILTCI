@@ -157,8 +157,8 @@ images:
 ---
 layout: Image Right
 images:
-  - src: rpec.png
-    data-caption: "Visit https://rpec-rag.streamlit.app to try it out yourself"
+  - src: rpec-half-light.png
+    data-caption: "Visit https://rpec-rag.streamlit.app to try it out"
 ---
 
 # Specific Use Cases
@@ -189,7 +189,7 @@ layout: Text
 layout: Dual Image
 images:
   - src: menugen-upload.png
-  - src: menugen-images.png
+  - src: menugen-output.png
 ---
 
 # Sample Projects
@@ -224,7 +224,7 @@ layout: Text
 - AI is the expert, people are the managers
 
 **Embrace new skill sets** 
-- Your will learn different ways to manage and steer AI generation
+- You will learn different ways to manage and steer AI generation
 
 **Active learning** 
 - Passion projects are a great way to grasp AI capabilities
@@ -270,7 +270,7 @@ layout: Text
 ---
 layout: Image Right
 images:
-  - src: streamlit-app-half.png
+  - src: pptx-half-light.png
 ---
 
 # Concluding remarks
