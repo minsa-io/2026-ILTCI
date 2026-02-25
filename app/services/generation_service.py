@@ -45,9 +45,9 @@ def _build_merged_config(
     
     Args:
         content_source: "Default" or "Upload custom content"
-        template_source: "Default" or "Upload custom template"
-        assets_source: "Default" or "Upload custom assets"
-        style_mode: "none", "default", or "custom overrides"
+        template_source: "None", "Default", or "Upload custom template"
+        assets_source: "None", "Default", or "Upload custom assets"
+        style_mode: "None", "Default", or "Upload custom overrides"
         output_filename: Name for output file
         use_temp_output: Whether to use temp directory for output
         overwrite: Whether to allow overwriting
@@ -64,21 +64,28 @@ def _build_merged_config(
         merged_config['paths']['content'] = uploaded_content_path
     
     # Handle template path
-    if template_source == "Upload custom template" and uploaded_template_path:
+    if template_source == "None":
+        # Remove template so the generator uses a blank presentation
+        merged_config['paths'].pop('template', None)
+    elif template_source == "Upload custom template" and uploaded_template_path:
         merged_config['paths']['template'] = uploaded_template_path
         set_state_value(SessionKeys.TEMPLATE_PATH, uploaded_template_path)
     
-    # Handle assets path - use session directory if custom assets selected
-    custom_assets_dir = get_state_value(SessionKeys.CUSTOM_ASSETS_DIR)
-    if assets_source == "Upload custom assets" and custom_assets_dir:
-        session_dir = Path(custom_assets_dir)
-        session_files = get_session_asset_files(session_dir)
-        
-        if session_files:
-            merged_config['paths']['assets_dir'] = custom_assets_dir
-            st.info(f"Using {len(session_files)} custom asset(s) from session directory")
-        else:
-            st.warning("⚠️ No custom assets found. Using default assets directory.")
+    # Handle assets path
+    if assets_source == "None":
+        # Remove assets_dir so the generator doesn't look for an assets folder
+        merged_config['paths'].pop('assets_dir', None)
+    elif assets_source == "Upload custom assets":
+        custom_assets_dir = get_state_value(SessionKeys.CUSTOM_ASSETS_DIR)
+        if custom_assets_dir:
+            session_dir = Path(custom_assets_dir)
+            session_files = get_session_asset_files(session_dir)
+            
+            if session_files:
+                merged_config['paths']['assets_dir'] = custom_assets_dir
+                st.info(f"Using {len(session_files)} custom asset(s) from session directory")
+            else:
+                st.warning("⚠️ No custom assets found. Using default assets directory.")
     
     # Update settings
     merged_config['settings']['overwrite_output'] = overwrite
@@ -94,8 +101,8 @@ def _build_merged_config(
     
     merged_config['paths']['output'] = str(output_path)
     
-    # Remove styles_overrides path when "none" mode selected
-    if style_mode == "none":
+    # Remove styles_overrides path when "None" mode selected
+    if style_mode == "None":
         if 'paths' in merged_config:
             merged_config['paths'].pop('styles_overrides', None)
     
@@ -117,9 +124,9 @@ def generate_presentation(
     
     Args:
         content_source: "Default" or "Upload custom content"
-        template_source: "Default" or "Upload custom template"
-        assets_source: "Default" or "Upload custom assets"
-        style_mode: "none", "default", or "custom overrides"
+        template_source: "None", "Default", or "Upload custom template"
+        assets_source: "None", "Default", or "Upload custom assets"
+        style_mode: "None", "Default", or "Upload custom overrides"
         output_filename: Name for output file
         use_temp_output: Whether to use temp directory for output
         overwrite: Whether to allow overwriting
@@ -152,22 +159,41 @@ def generate_presentation(
         if use_temp_output:
             temp_dir = output_path.parent
         
+        # Determine if template should be excluded from path validation
+        exclude_paths: list[str] = []
+        if template_source in ("None", "Upload custom template"):
+            exclude_paths.append('template')
+        
         # Create Config and generate
         cfg = Config.from_dict(
             merged_config,
             CONFIG_DIR,
-            exclude=['template'] if uploaded_template_path else None,
+            exclude=exclude_paths or None,
         )
         generator = PresentationGenerator(cfg)
-        template_override = (
-            Path(uploaded_template_path)
-            if template_source == "Upload custom template" and uploaded_template_path
-            else None
-        )
-        generator.generate(
-            template_override=template_override,
-            style_overrides=get_style_overrides(),
-        )
+        
+        # Determine template override
+        temp_blank_template: str | None = None
+        if template_source == "None":
+            # Create a blank presentation to use as template (built-in layouts only)
+            from pptx import Presentation
+            blank_prs = Presentation()
+            temp_blank_template = write_temp_file(b'', '.pptx')
+            blank_prs.save(temp_blank_template)
+            template_override = Path(temp_blank_template)
+        elif template_source == "Upload custom template" and uploaded_template_path:
+            template_override = Path(uploaded_template_path)
+        else:
+            template_override = None
+        
+        try:
+            generator.generate(
+                template_override=template_override,
+                style_overrides=get_style_overrides(),
+            )
+        finally:
+            # Clean up blank template temp file
+            cleanup_temp_file(temp_blank_template)
         
         # Read generated file
         pptx_bytes = output_path.read_bytes()

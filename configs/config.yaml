@@ -37,4 +37,4 @@ ui:
     use_temp_output: true
   advanced:
     show_template_paths: false
-  style_overrides_mode: "default"
+  style_overrides_mode: "Default"

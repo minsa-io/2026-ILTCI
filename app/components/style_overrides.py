@@ -17,15 +17,15 @@ def render_style_overrides_section(base_config: dict[str, Any]) -> str:
         base_config: Base configuration dictionary
         
     Returns:
-        The selected style mode ("none", "default", or "custom overrides")
+        The selected style mode ("None", "Default", or "Upload custom overrides")
     """
     st.subheader("🎨 Style Overrides")
     
     ui_config = get_ui_config()
     
     # Get default mode from config
-    style_mode_options = ["none", "default", "custom overrides"]
-    default_style_mode = ui_config.get("style_overrides_mode", "default")
+    style_mode_options = ["None", "Default", "Upload custom overrides"]
+    default_style_mode = ui_config.get("style_overrides_mode", "Default")
     style_mode_index = style_mode_options.index(default_style_mode) if default_style_mode in style_mode_options else 0
     
     col_s1, col_s2 = st.columns(2)
@@ -40,13 +40,13 @@ def render_style_overrides_section(base_config: dict[str, Any]) -> str:
         )
     
     style_overrides = None
-    if style_mode == "default":
+    if style_mode == "Default":
         with col_s2:
             st.info("Using default: `configs/style-overrides.yaml`")
         style_overrides = load_style_overrides()
         if style_overrides is None:
             st.warning("⚠️ Default style-overrides.yaml not found")
-    elif style_mode == "custom overrides":
+    elif style_mode == "Upload custom overrides":
         with col_s2:
             uploaded_styles = st.file_uploader(
                 "Upload custom styles YAML",

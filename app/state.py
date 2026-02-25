@@ -13,9 +13,9 @@ from app.constants import SessionKeys
 class Choices:
     """User choices from UI selections."""
     content_source: str = "Default"  # "Default" or "Upload custom content"
-    assets_source: str = "Default"   # "Default" or "Upload custom assets"
+    assets_source: str = "Default"   # "None", "Default", or "Upload custom assets"
     template_source: str = "Default"  # "Default" or "Upload custom template"
-    style_mode: str = "default"  # "none", "default", or "custom overrides"
+    style_mode: str = "Default"  # "None", "Default", or "Upload custom overrides"
     output_filename: str = "presentation.pptx"
     use_temp_output: bool = True
     overwrite: bool = True
