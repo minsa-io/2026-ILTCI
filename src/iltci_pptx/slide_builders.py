@@ -11,6 +11,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from pptx.util import Pt
+from pptx.dml.color import RGBColor
 
 from .config import Config
 from pathlib import Path
@@ -733,6 +734,9 @@ def populate_slide(
             build_rich_content(text_frame, data.content_blocks, config, data.layout_name)
             logger.debug(f"  Populated {len(data.content_blocks)} content blocks")
 
+    # --- Cleanup: blank out any remaining layout text that wasn't populated ---
+    _clear_unused_layout_text(slide)
+
 
 def _normalize_layout_key(layout_name: str) -> str:
     """Normalize layout name to a config-friendly key.
@@ -746,6 +750,44 @@ def _normalize_layout_key(layout_name: str) -> str:
         Normalized key (e.g., "image_right", "dual_image")
     """
     return layout_name.lower().replace(" ", "_")
+
+
+def _extract_template_props(text_frame: "TextFrame") -> dict:
+    """Extract formatting properties from a text frame before clearing.
+
+    Captures font name, color, size, and line spacing from the first
+    paragraph/run so they can be re-applied as fallback defaults after
+    ``text_frame.clear()`` destroys the template formatting.
+
+    Args:
+        text_frame: PowerPoint text frame to extract properties from.
+
+    Returns:
+        Dict with optional keys: ``font_name`` (str), ``font_color``
+        (:class:`~pptx.util.RGBColor`), ``font_size`` (EMU value),
+        ``line_spacing`` (float or :class:`~pptx.util.Pt`).
+    """
+    props: dict = {}
+    try:
+        if text_frame.paragraphs:
+            para = text_frame.paragraphs[0]
+            if para.line_spacing is not None:
+                props['line_spacing'] = para.line_spacing
+            if para.runs:
+                run = para.runs[0]
+                if run.font.name:
+                    props['font_name'] = run.font.name
+                if run.font.size is not None:
+                    props['font_size'] = run.font.size
+                try:
+                    rgb = run.font.color.rgb
+                    if rgb is not None:
+                        props['font_color'] = rgb
+                except (AttributeError, TypeError):
+                    pass
+    except Exception:
+        logger.debug("Could not extract template properties from text frame")
+    return props
 
 
 def build_rich_content(
@@ -764,6 +806,10 @@ def build_rich_content(
     2. fonts.<layout_key>.<property> (e.g., fonts.text.h2_header)
     3. Default values
     
+    Template formatting (font name, color, line spacing) is extracted from
+    the text frame before clearing and re-applied as fallbacks when no
+    config override is present.
+    
     Supports:
     - Headers: ## (H2), ### (H3), #### (H4), ##### (H5)
     - Bullets: - (level 0), "  - " (level 1)
@@ -780,6 +826,9 @@ def build_rich_content(
     Example:
         >>> build_rich_content(text_frame, ["## Introduction", "- Point 1"], config, "Text")
     """
+    # Extract template formatting before clearing (clear destroys it)
+    template_props = _extract_template_props(text_frame)
+    
     # Clear existing content
     text_frame.clear()
     
@@ -797,6 +846,21 @@ def build_rich_content(
             val = config.get(f"fonts.{layout_key}.{prop}", None)
             if val is not None:
                 return val
+        return default
+    
+    def get_font_prop(prop: str, default=None):
+        """Get a font property from config, trying layout-specific then global.
+        
+        Used for non-size font properties (font_name, font_color) where the
+        template value serves as the ultimate fallback.
+        """
+        if layout_key:
+            val = config.get(f"fonts.{layout_key}.{prop}", None)
+            if val is not None:
+                return val
+        val = config.get(f"fonts.{prop}", None)
+        if val is not None:
+            return val
         return default
     
     def get_formatting(prop: str, default: bool) -> bool:
@@ -826,14 +890,17 @@ def build_rich_content(
         return default
     
     # Get font sizes using layout-aware lookup
-    h2_size = get_font_size("h2_header", 28)
-    h3_size = get_font_size("h3_header", 24)
-    h4_size = get_font_size("h4_header", 20)
-    h5_size = get_font_size("h5_header", 18)
-    body_size = get_font_size("body_text", 24)
-    bullet_size = get_font_size("bullet", 24)
-    numbered_size = get_font_size("numbered", 24)
-    spacer_size = get_font_size("spacer", 12)
+    # Use template font_size (EMU) converted to pt as fallback for body-level defaults
+    _tpl_font_size_emu = template_props.get('font_size')
+    _tpl_fs = round(_tpl_font_size_emu / 12700) if _tpl_font_size_emu else 24
+    h2_size = get_font_size("h2_header", _tpl_fs + 4)
+    h3_size = get_font_size("h3_header", _tpl_fs)
+    h4_size = get_font_size("h4_header", max(_tpl_fs - 4, 10))
+    h5_size = get_font_size("h5_header", max(_tpl_fs - 6, 8))
+    body_size = get_font_size("body_text", _tpl_fs)
+    bullet_size = get_font_size("bullet", _tpl_fs)
+    numbered_size = get_font_size("numbered", _tpl_fs)
+    spacer_size = get_font_size("spacer", max(_tpl_fs // 2, 6))
     numbering_type = config.get("bullets.numbering_type", "arabicPeriod")
     
     # Get bold settings using layout-aware lookup
@@ -843,8 +910,22 @@ def build_rich_content(
     h5_bold = get_formatting("h5_bold", False)
     
     # Get spacing settings using layout-aware lookup
-    line_spacing = get_spacing("line_spacing", None)  # None = use template default
+    # Use template line_spacing as fallback when config doesn't specify
+    line_spacing = get_spacing("line_spacing", template_props.get('line_spacing'))
     space_after_pt = get_spacing("space_after_pt", None)  # None = use template default
+    
+    # Resolve font name: config overrides > template default
+    font_name = get_font_prop("font_name", template_props.get('font_name'))
+    
+    # Resolve font color: config (hex string) > template (RGBColor)
+    font_color_cfg = get_font_prop("font_color", None)
+    if font_color_cfg is not None:
+        hex_str = str(font_color_cfg).lstrip('#')
+        font_color: RGBColor | None = RGBColor(
+            int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
+        )
+    else:
+        font_color = template_props.get('font_color')
     
     # Process each content block
     for block in content_blocks:
@@ -872,6 +953,8 @@ def build_rich_content(
                 h5_bold=h5_bold,
                 line_spacing=line_spacing,
                 space_after_pt=space_after_pt,
+                font_name=font_name,
+                font_color=font_color,
             )
 
 
@@ -894,6 +977,8 @@ def _add_content_line(
     h5_bold: bool,
     line_spacing: float | None = None,
     space_after_pt: int | None = None,
+    font_name: str | None = None,
+    font_color: RGBColor | None = None,
 ) -> None:
     """Add a single content line to a text frame with appropriate formatting.
     
@@ -906,6 +991,10 @@ def _add_content_line(
         h2_size - h5_bold: Formatting parameters from config.
         line_spacing: Line spacing multiplier (1.0 = single, None = template default).
         space_after_pt: Space after paragraph in points (None = template default).
+        font_name: Font family name (e.g. "Arial"). Applied to all runs as a
+            fallback from the template when config doesn't override.
+        font_color: Font color as :class:`~pptx.util.RGBColor`. Applied to all
+            runs as a fallback from the template when config doesn't override.
     """
     def _apply_paragraph_spacing(para):
         """Apply line spacing and space_after to a paragraph if configured."""
@@ -913,6 +1002,13 @@ def _add_content_line(
             para.line_spacing = line_spacing
         if space_after_pt is not None:
             para.space_after = Pt(space_after_pt)
+    
+    def _apply_template_font(run) -> None:
+        """Apply template-derived font defaults (name, color) to a run."""
+        if font_name is not None:
+            run.font.name = font_name
+        if font_color is not None:
+            run.font.color.rgb = font_color
     
     # Handle spacer markers (blank lines in markdown)
     if line == SPACER_MARKER:
@@ -938,6 +1034,7 @@ def _add_content_line(
             run.font.size = Pt(h5_size)
             if h5_bold:
                 run.font.bold = True
+            _apply_template_font(run)
         logger.debug(f"  Added H5: {line[6:]}")
         return
     
@@ -952,6 +1049,7 @@ def _add_content_line(
             run.font.size = Pt(h4_size)
             if h4_bold:
                 run.font.bold = True
+            _apply_template_font(run)
         logger.debug(f"  Added H4: {line[5:]}")
         return
     
@@ -966,6 +1064,7 @@ def _add_content_line(
             run.font.size = Pt(h3_size)
             if h3_bold:
                 run.font.bold = True
+            _apply_template_font(run)
         logger.debug(f"  Added H3: {line[4:]}")
         return
     
@@ -980,6 +1079,7 @@ def _add_content_line(
             run.font.size = Pt(h2_size)
             if h2_bold:
                 run.font.bold = True
+            _apply_template_font(run)
         logger.debug(f"  Added H2: {line[3:]}")
         return
     
@@ -992,6 +1092,7 @@ def _add_content_line(
         _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(bullet_size)
+            _apply_template_font(run)
         logger.debug(f"  Added sub-bullet: {line[4:]}")
         return
     
@@ -1004,6 +1105,7 @@ def _add_content_line(
         _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(bullet_size)
+            _apply_template_font(run)
         logger.debug(f"  Added bullet: {line[2:]}")
         return
     
@@ -1019,6 +1121,7 @@ def _add_content_line(
         _apply_paragraph_spacing(p)
         for run in p.runs:
             run.font.size = Pt(numbered_size)
+            _apply_template_font(run)
         logger.debug(f"  Added numbered item {num}: {text}")
         return
     
@@ -1029,4 +1132,5 @@ def _add_content_line(
     _apply_paragraph_spacing(p)
     for run in p.runs:
         run.font.size = Pt(body_size)
+        _apply_template_font(run)
     logger.debug(f"  Added text: {line}")

@@ -18,6 +18,7 @@ from typing import Optional
 from .config import Config
 from .layout_discovery import load_layout_registry, LayoutRegistry, get_available_layout_names
 from .markdown_parser import parse_markdown_file, parse_markdown_slides, SlideData
+from .images import fix_layout_picture_aspect_ratios
 from .slide_builders import build_slide, populate_slide
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,9 @@ class PresentationGenerator:
         logger.info(f"Template has {len(prs.slide_masters)} slide master(s)")
         logger.info(f"Template has {len(prs.slide_layouts)} total layouts")
         logger.info(f"Template has {len(prs.slides)} existing slides")
+        
+        # Fix stretched non-placeholder pictures on layouts (e.g. logos)
+        fix_layout_picture_aspect_ratios(prs)
         
         # Remove existing content slides
         logger.info("Removing existing slides from template...")

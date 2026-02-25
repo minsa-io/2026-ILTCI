@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from pptx.util import Inches, Emu, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, MSO_SHAPE_TYPE
 from pptx.enum.shapes import PP_PLACEHOLDER_TYPE as PH_TYPE
 from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 from pptx.enum.text import PP_ALIGN
@@ -722,3 +722,75 @@ def add_image_with_caption(slide: 'Slide', img_path: Path,
     except Exception as e:
         logging.error(f"Error adding image to area: {e}")
         return None, top + height
+
+
+def fix_layout_picture_aspect_ratios(prs: 'Presentation') -> None:
+    """Fix aspect ratios of non-placeholder PICTURE shapes on slide layouts.
+
+    Some templates have PICTURE shapes (logos, decorative images) on layouts
+    with dimensions that don't match the original image aspect ratio, causing
+    stretching. This function adjusts dimensions to preserve aspect ratio
+    using a 'contain' strategy (fit within original bounding box, centered).
+
+    Full-bleed background images (covering ≥90% of the slide) are skipped.
+
+    Args:
+        prs: PowerPoint Presentation object (modified in place).
+    """
+    slide_w = prs.slide_width
+    slide_h = prs.slide_height
+
+    for layout in prs.slide_layouts:
+        for shape in layout.shapes:
+            # Only fix non-placeholder PICTURE shapes
+            if shape.shape_type != MSO_SHAPE_TYPE.PICTURE:
+                continue
+            if shape.is_placeholder:
+                continue
+
+            # Skip full-bleed background images
+            if shape.width >= slide_w * 0.9 and shape.height >= slide_h * 0.9:
+                continue
+
+            try:
+                img_w, img_h = shape.image.size  # original pixel dimensions
+                if img_w <= 0 or img_h <= 0:
+                    continue
+
+                orig_ratio = img_w / img_h
+                shape_ratio = shape.width / shape.height
+
+                # Skip if aspect ratios already match (within 2% tolerance)
+                if abs(orig_ratio - shape_ratio) / max(orig_ratio, shape_ratio) < 0.02:
+                    continue
+
+                # Contain: fit within bounding box, preserving aspect ratio
+                if orig_ratio > shape_ratio:
+                    # Image is wider relative to shape — constrain by width
+                    new_w = shape.width
+                    new_h = int(shape.width / orig_ratio)
+                else:
+                    # Image is taller relative to shape — constrain by height
+                    new_h = shape.height
+                    new_w = int(shape.height * orig_ratio)
+
+                # Center horizontally on slide, keep vertical midpoint
+                new_left = (slide_w - new_w) // 2
+                orig_mid_top = shape.top + shape.height // 2
+                new_top = orig_mid_top - new_h // 2
+
+                logging.info(
+                    f"Fixing aspect ratio for '{shape.name}' on layout '{layout.name}': "
+                    f"{shape.width}x{shape.height} -> {new_w}x{new_h} EMU "
+                    f"(centered at left={new_left})"
+                )
+
+                shape.left = new_left
+                shape.top = new_top
+                shape.width = new_w
+                shape.height = new_h
+
+            except Exception as e:
+                logging.debug(
+                    f"Could not fix aspect ratio for shape '{shape.name}': {e}"
+                )
