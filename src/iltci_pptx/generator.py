@@ -69,7 +69,9 @@ class PresentationGenerator:
             style_overrides: Optional dict of style overrides to apply to slides.
         """
         # Validate paths exist
-        self.config.validate_paths()
+        self.config.validate_paths(
+            exclude=['template'] if template_override else None
+        )
         
         # Determine template path (may be overridden or set via frontmatter later)
         template_path = template_override or self.config.template_path

@@ -153,9 +153,21 @@ def generate_presentation(
             temp_dir = output_path.parent
         
         # Create Config and generate
-        cfg = Config.from_dict(merged_config, CONFIG_DIR)
+        cfg = Config.from_dict(
+            merged_config,
+            CONFIG_DIR,
+            exclude=['template'] if uploaded_template_path else None,
+        )
         generator = PresentationGenerator(cfg)
-        generator.generate(style_overrides=get_style_overrides())
+        template_override = (
+            Path(uploaded_template_path)
+            if template_source == "Upload custom template" and uploaded_template_path
+            else None
+        )
+        generator.generate(
+            template_override=template_override,
+            style_overrides=get_style_overrides(),
+        )
         
         # Read generated file
         pptx_bytes = output_path.read_bytes()

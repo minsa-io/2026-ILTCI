@@ -1,5 +1,6 @@
 """Generate button and generation logic component."""
 
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -52,6 +53,10 @@ def render_generate_section(
         st.error("❌ Please upload a Markdown file first.")
         return False
     
+    if template_source == "Upload custom template" and uploaded_template is None:
+        st.error("❌ Please upload a PowerPoint template file first.")
+        return False
+    
     temp_content_path: str | None = None
     temp_template_path: str | None = None
     
@@ -62,7 +67,8 @@ def render_generate_section(
         
         # Handle uploaded template file
         if template_source == "Upload custom template" and uploaded_template:
-            temp_template_path = write_temp_file(uploaded_template.read(), '.pptx')
+            suffix = Path(uploaded_template.name).suffix or '.pptx'
+            temp_template_path = write_temp_file(uploaded_template.read(), suffix)
         
         # Generate presentation
         with st.spinner('🔄 Generating presentation...'):

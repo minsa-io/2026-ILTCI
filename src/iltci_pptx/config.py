@@ -3,7 +3,7 @@
 import yaml
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Iterable
 
 
 def load_yaml_file(file_path: Path) -> Dict[str, Any]:
@@ -57,7 +57,14 @@ class Config:
         self._setup_logging()
     
     @classmethod
-    def from_dict(cls, main_config: Dict[str, Any], config_dir: Path) -> "Config":
+    def from_dict(
+        cls,
+        main_config: Dict[str, Any],
+        config_dir: Path,
+        *,
+        validate: bool = True,
+        exclude: Iterable[str] | None = None
+    ) -> "Config":
         """Create Config instance from dictionary (for Streamlit integration).
         
         Args:
@@ -102,7 +109,8 @@ class Config:
             logging.debug(f"Loaded styles overrides from: {styles_overrides_path}")
         
         config._setup_logging()
-        config.validate_paths()
+        if validate:
+            config.validate_paths(exclude=exclude)
         return config
     
     def _resolve_path_value(self, value: str) -> Path:
@@ -210,12 +218,15 @@ class Config:
             raise ValueError(f"Path '{key}' not found in configuration")
         return self._resolve_path_value(path_str)
     
-    def validate_paths(self):
+    def validate_paths(self, exclude: Iterable[str] | None = None):
         """Validate that required paths exist using resolved paths."""
         required_paths = ['template', 'content']
+        excluded = set(exclude or [])
         missing = []
         
         for path_key in required_paths:
+            if path_key in excluded:
+                continue
             try:
                 path = self.get_path(path_key)
                 if not path.exists():

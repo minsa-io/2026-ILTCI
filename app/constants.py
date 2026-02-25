@@ -24,6 +24,8 @@ ASSET_FILE_TYPES: list[str] = [
     'yaml', 'yml', 'json', 'css', 'txt', 'md'
 ]
 
+TEMPLATE_FILE_TYPES: list[str] = ['pptx', 'potx']
+
 # === Session State Keys ===
 class SessionKeys:
     """Session state key constants to avoid magic strings."""
