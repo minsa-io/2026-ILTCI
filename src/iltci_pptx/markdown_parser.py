@@ -43,6 +43,8 @@ class SlideData:
         section_name: Optional section marker for navigation.
         raw_content: Original markdown content after frontmatter removal.
         options: Additional options from frontmatter (image_fit, bg_image, etc.).
+        slide_id: Optional slide identifier from frontmatter 'id' key.
+        frontmatter: Full parsed frontmatter dict (including nested structures).
     """
     layout_name: str
     title: str | None = None
@@ -51,6 +53,8 @@ class SlideData:
     section_name: str = ""
     raw_content: str = ""
     options: dict[str, Any] = field(default_factory=dict)
+    slide_id: str | None = None
+    frontmatter: dict[str, Any] = field(default_factory=dict)
 
 
 def parse_document_frontmatter(content: str, delimiter: str = '---') -> tuple[dict[str, Any], str]:
@@ -350,6 +354,50 @@ def _split_into_slides(markdown_content: str, slide_separator: str = '---') -> l
     return slides
 
 
+def _normalize_slide_frontmatter(
+    raw_fm: dict[str, Any],
+) -> dict[str, Any]:
+    """Normalize raw slide frontmatter into a consistent shape.
+
+    Normalization rules:
+    - ``image.path`` (singular) is converted to ``images: [{src: <path>}]``
+    - ``images`` as a list of strings becomes ``[{src: <string>}]``
+    - ``images`` as a list of dicts is kept as-is
+    - ``body`` (string or multiline) is stored so the caller can derive
+      ``content_blocks`` when the markdown body is empty
+    - ``id`` is surfaced as ``slide_id``
+
+    Args:
+        raw_fm: Raw frontmatter dict from :func:`parse_slide_frontmatter`.
+
+    Returns:
+        A new dict with the same keys plus any normalized additions.
+    """
+    fm = dict(raw_fm)  # shallow copy
+
+    # --- images normalization ---
+    images: list[dict[str, Any]] = []
+
+    # Singular ``image.path`` style (from session example)
+    image_block = fm.get('image')
+    if isinstance(image_block, dict) and 'path' in image_block:
+        images.append({'src': image_block['path']})
+
+    # ``images`` key – accept list of strings or list of dicts
+    raw_images = fm.get('images')
+    if isinstance(raw_images, list):
+        for entry in raw_images:
+            if isinstance(entry, str):
+                images.append({'src': entry})
+            elif isinstance(entry, dict):
+                images.append(entry)
+
+    if images:
+        fm['_normalized_images'] = images
+
+    return fm
+
+
 def parse_slides(
     markdown_content: str,
     registry: LayoutRegistry,
@@ -391,8 +439,11 @@ def parse_slides(
         logger.debug(f"Raw content preview: {raw_slide[:100]}...")
         
         # Parse per-slide frontmatter
-        frontmatter, content = parse_slide_frontmatter(raw_slide)
-        logger.debug(f"Frontmatter: {frontmatter}")
+        raw_frontmatter, content = parse_slide_frontmatter(raw_slide)
+        logger.debug(f"Frontmatter: {raw_frontmatter}")
+        
+        # Normalize frontmatter into a consistent shape
+        frontmatter = _normalize_slide_frontmatter(raw_frontmatter)
         
         # Extract layout name (required)
         layout_name = frontmatter.get('layout')
@@ -424,14 +475,51 @@ def parse_slides(
         # Title priority: frontmatter > first H1 in content
         title = frontmatter.get('title') or title_from_content
         
-        # Extract images: frontmatter images list + images found in content
-        images = list(frontmatter.get('images', []))
+        # Extract images: normalized images from frontmatter + images in content
+        normalized_images = frontmatter.get('_normalized_images', [])
+        images = [img.get('src', '') for img in normalized_images if img.get('src')]
+        # Also keep raw frontmatter 'images' list for backward compat
+        raw_fm_images = frontmatter.get('images', [])
+        if isinstance(raw_fm_images, list) and not normalized_images:
+            images = list(raw_fm_images)
         images.extend(_extract_images_from_content(content))
         
-        # Collect additional options
+        # Derive content_blocks from frontmatter 'body' when markdown body is empty
+        fm_body = frontmatter.get('body')
+        if fm_body and not content_blocks:
+            if isinstance(fm_body, str):
+                content_blocks = [fm_body.strip()]
+            logger.debug(f"  Derived content_blocks from frontmatter 'body'")
+        
+        # Derive content_blocks from frontmatter 'features' (grid layouts).
+        # Each feature dict with 'title' and 'description' keys produces two
+        # content blocks (title then description), matching the expected
+        # order of ph_feature_title_N / ph_feature_desc_N layout shapes.
+        fm_features = frontmatter.get('features')
+        if isinstance(fm_features, list) and not content_blocks:
+            for feature in fm_features:
+                if isinstance(feature, dict):
+                    feat_title = feature.get('title', '')
+                    feat_desc = feature.get('description', '')
+                    if feat_title:
+                        content_blocks.append(str(feat_title))
+                    if feat_desc:
+                        content_blocks.append(str(feat_desc))
+            if content_blocks:
+                logger.debug(
+                    f"  Derived {len(content_blocks)} content_blocks "
+                    f"from frontmatter 'features'"
+                )
+        
+        # Extract slide_id from frontmatter 'id'
+        slide_id = frontmatter.get('id')
+        if slide_id is not None:
+            slide_id = str(slide_id)
+        
+        # Collect additional options (deprecated, prefer frontmatter dict)
         options = {
             k: v for k, v in frontmatter.items()
-            if k not in ('layout', 'title', 'images')
+            if k not in ('layout', 'title', 'images', 'id', '_normalized_images')
         }
         
         slide_data = SlideData(
@@ -442,10 +530,12 @@ def parse_slides(
             section_name=section_name,
             raw_content=content,
             options=options,
+            slide_id=slide_id,
+            frontmatter=frontmatter,
         )
         
         logger.debug(f"Created SlideData: layout={layout_name}, title={title}, "
-                    f"blocks={len(content_blocks)}, images={len(images)}")
+                    f"id={slide_id}, blocks={len(content_blocks)}, images={len(images)}")
         slides.append(slide_data)
     
     logger.info(f"Parsed {len(slides)} slides from markdown")

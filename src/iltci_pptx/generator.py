@@ -75,6 +75,9 @@ class PresentationGenerator:
         
         # Determine template path (may be overridden or set via frontmatter later)
         template_path = template_override or self.config.template_path
+        logger.debug(f"Resolved config template path: {self.config.template_path}")
+        if template_override:
+            logger.debug(f"Template override provided: {template_override}")
         
         # Load layout registry from template (for validation and building)
         logger.info(f"Discovering layouts from template: {template_path}")
@@ -117,7 +120,13 @@ class PresentationGenerator:
         # config template for consistent behavior.
         if 'template' in doc_frontmatter and not template_override:
             new_template = self.config.project_root / doc_frontmatter['template']
-            if new_template != template_path:
+            logger.debug(f"Frontmatter template resolved to: {new_template}")
+            if not new_template.exists():
+                logger.warning(
+                    "Frontmatter template not found; keeping config template. "
+                    f"Missing: {new_template}"
+                )
+            elif new_template != template_path:
                 logger.info(f"Template in frontmatter: {new_template}")
                 # Verify the new template has compatible layouts
                 new_registry = load_layout_registry(new_template)
@@ -151,11 +160,15 @@ class PresentationGenerator:
         
         # Build and populate slides using generic pipeline
         for idx, data in enumerate(slide_data_list):
-            logger.info(f"\n=== Slide {idx + 1}: {data.layout_name} ===")
+            id_label = f" (id={data.slide_id})" if data.slide_id else ""
+            logger.info(f"\n=== Slide {idx + 1}: {data.layout_name}{id_label} ===")
             if data.title:
                 logger.info(f"  Title: {data.title[:60]}{'...' if len(data.title) > 60 else ''}")
             if data.images:
                 logger.info(f"  Images: {len(data.images)}")
+            if data.frontmatter:
+                fm_keys = [k for k in data.frontmatter if k != '_normalized_images']
+                logger.debug(f"  Frontmatter keys: {fm_keys}")
             
             try:
                 # Build slide using layout from registry

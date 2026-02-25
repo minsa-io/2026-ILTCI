@@ -59,11 +59,14 @@ def get_picture_placeholders(slide: 'Slide') -> List[Any]:
     """
     picture_phs = []
     for shape in slide.shapes:
-        if not hasattr(shape, 'placeholder_format'):
+        try:
+            if not shape.is_placeholder:
+                continue
+            ph_format = shape.placeholder_format
+            if ph_format and ph_format.type == PH_TYPE.PICTURE:
+                picture_phs.append(shape)
+        except (ValueError, AttributeError):
             continue
-        ph_format = shape.placeholder_format
-        if ph_format and ph_format.type == PH_TYPE.PICTURE:
-            picture_phs.append(shape)
     
     # Sort by left position for consistent left-to-right ordering
     picture_phs.sort(key=lambda ph: ph.left)
@@ -450,7 +453,12 @@ def add_images_for_layout(
     for i, img_info in enumerate(slide_data.images[:len(picture_phs)]):
         ph = picture_phs[i]
         
-        img_src = img_info.get('src', '')
+        # Support both string paths and dict entries (with 'src' key)
+        if isinstance(img_info, str):
+            img_src = img_info
+            img_info = {'src': img_info}
+        else:
+            img_src = img_info.get('src', '')
         if not img_src:
             logging.warning(f"Image at index {i} has no 'src' attribute, skipping")
             continue

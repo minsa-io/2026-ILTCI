@@ -13,10 +13,12 @@ from typing import TYPE_CHECKING
 from pptx.util import Pt
 
 from .config import Config
-from .images import add_images_for_layout
+from pathlib import Path
+
+from .images import add_images_for_layout, add_background_image
 from .layout_discovery import LayoutRegistry, validate_layout_name
 from .markdown_parser import SlideData, SPACER_MARKER
-from .placeholder_resolver import resolve_placeholders, PlaceholderNotFoundError
+from .placeholder_resolver import resolve_placeholders, get_placeholders, PlaceholderNotFoundError
 from .rich_text import add_formatted_text, add_bullet, remove_bullet, add_numbering
 
 if TYPE_CHECKING:
@@ -25,6 +27,35 @@ if TYPE_CHECKING:
     from pptx.text.text import TextFrame
 
 logger = logging.getLogger(__name__)
+
+# Tag used to mark which layout TextBox was used for a given semantic prompt
+# (title/subtitle/body/etc.). We use this because we may clear the layout
+# "Click to add …" text to prevent it from rendering behind a cloned
+# slide-level textbox. After clearing, text-based matching no longer works.
+_LAYOUT_PROMPT_TAG_PREFIX = "iltci_prompt:"
+
+
+def _get_layout_shape_descr(shape) -> str:
+    """Best-effort read of a layout shape's non-visual description field."""
+    try:
+        cNvPr = shape._element.nvSpPr.cNvPr
+        return cNvPr.get("descr") or ""
+    except Exception:
+        return ""
+
+
+def _append_layout_shape_descr_tag(shape, tag: str) -> None:
+    """Append a tag to the layout shape's non-visual description field."""
+    try:
+        cNvPr = shape._element.nvSpPr.cNvPr
+        existing = (cNvPr.get("descr") or "").strip()
+        if tag in existing:
+            return
+        new_descr = f"{existing} {tag}".strip() if existing else tag
+        cNvPr.set("descr", new_descr)
+    except Exception:
+        # Non-fatal; tagging is only an optimization for later lookup.
+        return
 
 
 def build_slide(layout_name: str, prs: "Presentation", registry: LayoutRegistry) -> "Slide":
@@ -63,6 +94,469 @@ def build_slide(layout_name: str, prs: "Presentation", registry: LayoutRegistry)
     return slide
 
 
+def _find_layout_shape_by_prompt(slide: "Slide", prompt_keyword: str):
+    """Find a TextBox shape on the slide's layout whose default text contains *prompt_keyword*.
+
+    Many modern templates use free-form TextBox shapes (not typed
+    placeholders) on the layout.  These shapes show "Click to add …"
+    prompt text that is visible in design mode.  When a slide is created
+    from such a layout the shapes are *not* inherited as editable
+    slide-level shapes; they render from the layout behind the slide
+    content.
+
+    To "fill" such a shape we need to:
+    1. Locate it on the layout by matching its prompt text.
+    2. Clone the shape's XML to the slide (preserving position, size,
+       and formatting).
+    3. Set the desired text on the clone.
+
+    This helper performs step 1.
+
+    Args:
+        slide: The slide whose *layout* will be searched.
+        prompt_keyword: Case-insensitive substring to match (e.g.
+            ``"title"``, ``"subtitle"``, ``"body"``).
+
+    Returns:
+        The first matching layout shape, or ``None``.
+    """
+    keyword_lower = prompt_keyword.lower()
+
+    # 1) Prefer a previously-tagged shape. This allows us to keep finding the
+    # correct layout shape even after we've cleared its prompt text.
+    tag = f"{_LAYOUT_PROMPT_TAG_PREFIX}{keyword_lower}"
+    for shape in slide.slide_layout.shapes:
+        descr = _get_layout_shape_descr(shape).lower()
+        if tag in descr:
+            return shape
+
+    # 2) Fallback: match by prompt text content (e.g., "Click to add title")
+    #    OR by shape name (e.g., "ph_feature_desc_1").
+    for shape in slide.slide_layout.shapes:
+        if shape.has_text_frame:
+            shape_text = shape.text_frame.text.lower()
+            shape_name = getattr(shape, "name", "").lower()
+            if keyword_lower in shape_text or keyword_lower in shape_name:
+                # Tag for future lookups (important if we clear the prompt text)
+                _append_layout_shape_descr_tag(shape, tag)
+                return shape
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Keywords used by the fallback content-shape search in populate_slide.
+# ---------------------------------------------------------------------------
+_CONTENT_KEYWORDS: list[str] = ["content", "body", "desc", "feature"]
+_TITLE_KEYWORDS: list[str] = ["title"]
+
+
+def _find_all_layout_shapes_by_keywords(
+    slide: "Slide",
+    keywords: list[str],
+    *,
+    already_used: set | None = None,
+) -> list:
+    """Find *all* layout TextBox shapes matching any of *keywords*.
+
+    Searches both ``shape.name`` and ``shape.text_frame.text`` (case-
+    insensitive).  Previously-tagged shapes (via the ``descr`` tag) are
+    also considered.  Shapes already consumed by an earlier call can be
+    excluded via *already_used* (a set of ``shape.shape_id``).
+
+    Returns:
+        A list of matching layout shapes in document order (preserves the
+        order they appear in the layout's shape tree).
+    """
+    used = already_used or set()
+    matches: list = []
+    kw_lowers = [kw.lower() for kw in keywords]
+
+    for shape in slide.slide_layout.shapes:
+        if shape.shape_id in used:
+            continue
+
+        # Check tag first (previously matched & tagged shapes).
+        descr = _get_layout_shape_descr(shape).lower()
+        for kw in kw_lowers:
+            tag = f"{_LAYOUT_PROMPT_TAG_PREFIX}{kw}"
+            if tag in descr:
+                matches.append(shape)
+                used.add(shape.shape_id)
+                break
+        else:
+            # No tag matched – try name and text.
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            shape_text = shape.text_frame.text.lower()
+            shape_name = getattr(shape, "name", "").lower()
+            for kw in kw_lowers:
+                if kw in shape_text or kw in shape_name:
+                    # Tag it for future lookups.
+                    tag = f"{_LAYOUT_PROMPT_TAG_PREFIX}{kw}"
+                    _append_layout_shape_descr_tag(shape, tag)
+                    matches.append(shape)
+                    used.add(shape.shape_id)
+                    break
+
+    return matches
+
+
+# Cache of original layout shape XML elements.
+# When a layout TextBox is cloned to a slide, the layout copy is cleared to
+# prevent visual overlap.  Subsequent slides sharing the same layout would
+# clone from the *cleared* element and lose all formatting.  This cache
+# stores a pristine deep-copy of the element **before** the first clear so
+# that every clone preserves the original font, size, color, etc.
+# Key: ``(id(slide_layout_object), shape_id)`` — both are stable across
+# python-pptx wrapper re-creations within a single generator run.
+_layout_shape_originals: dict[tuple, object] = {}
+
+
+def _shape_cache_key(layout_shape) -> tuple:
+    """Build a stable cache key for a layout shape.
+
+    ``id(element)`` is NOT reliable because lxml may return different
+    proxy objects for the same underlying node.  Instead we combine the
+    Python ``id`` of the *SlideLayout* (which **is** a stable singleton
+    per layout within a Presentation) with the shape's numeric ``id``
+    attribute from the XML (``<p:cNvPr id="…">``).
+    """
+    try:
+        # layout_shape lives inside a slide layout's spTree; walk up to
+        # obtain the layout wrapper.  python-pptx shapes don't expose this
+        # directly, so we rely on the part → package → Presentation chain.
+        # Easier: get shape_id (== cNvPr @id) which is unique per layout.
+        return (id(layout_shape.part), layout_shape.shape_id)
+    except Exception:
+        # Fallback — should not happen in normal operation.
+        return (id(layout_shape), getattr(layout_shape, "shape_id", 0))
+
+
+def _clone_layout_shape_with_text(slide: "Slide", layout_shape, text: str) -> bool:
+    """Clone a layout shape to the slide and set its text.
+
+    Creates a deep copy of *layout_shape*'s XML element and appends it
+    to the slide's shape tree.  The first paragraph of the cloned shape
+    is then set to *text*, preserving the original run-level formatting
+    (font family, size, color, etc.) from the layout.
+
+    To ensure formatting survives across multiple slides that share the
+    same layout, the original element XML is cached before the layout
+    shape is cleared.  Subsequent clones are made from this cache.
+
+    Args:
+        slide: Target slide.
+        layout_shape: Shape from the slide layout to clone.
+        text: Text to set on the cloned shape.
+
+    Returns:
+        ``True`` if the clone was created and text set, ``False`` on error.
+    """
+    from copy import deepcopy
+
+    try:
+        # NOTE: Many templates in this project use free-form TextBox shapes on the
+        # *layout* with literal prompt text like "Click to add title".
+        # When we clone a layout TextBox onto the slide to populate it, the
+        # original layout TextBox still renders behind the slide content unless
+        # we also clear its prompt text.
+        layout_prompt_text = ""
+        if getattr(layout_shape, "has_text_frame", False):
+            try:
+                layout_prompt_text = layout_shape.text_frame.text or ""
+            except Exception:
+                layout_prompt_text = ""
+
+        # Cache the pristine element before any modification so that
+        # subsequent slides cloning the same layout shape get full formatting.
+        shape_key = _shape_cache_key(layout_shape)
+        if shape_key not in _layout_shape_originals:
+            _layout_shape_originals[shape_key] = deepcopy(layout_shape._element)
+
+        cloned_sp = deepcopy(_layout_shape_originals[shape_key])
+        slide.shapes._spTree.append(cloned_sp)
+
+        # Walk the cloned shape to set text while preserving formatting.
+        # We locate the cloned shape by finding the element we just appended.
+        cloned_shape = None
+        for s in slide.shapes:
+            if s._element is cloned_sp:
+                cloned_shape = s
+                break
+
+        if cloned_shape is not None and cloned_shape.has_text_frame:
+            tf = cloned_shape.text_frame
+            # Preserve formatting of first paragraph / first run
+            if tf.paragraphs:
+                para = tf.paragraphs[0]
+                if para.runs:
+                    para.runs[0].text = text
+                    # Remove extra runs (prompt text spans)
+                    for run in para.runs[1:]:
+                        run.text = ""
+                else:
+                    para.text = text
+                # Remove subsequent paragraphs (some prompts span multiple)
+                for extra_para in tf.paragraphs[1:]:
+                    extra_para.text = ""
+            else:
+                tf.text = text
+
+            # Clear the underlying layout prompt so it doesn't visually overlap
+            # with the cloned slide-level textbox.  Any non-empty layout text is
+            # treated as a prompt—not just "Click to add …" strings.
+            if (
+                getattr(layout_shape, "has_text_frame", False)
+                and layout_prompt_text
+            ):
+                try:
+                    layout_shape.text_frame.clear()
+                    # Ensure no stray text remains in the default paragraph
+                    layout_shape.text_frame.text = ""
+                    logger.debug(
+                        "Cleared layout prompt text on shape '%s' (was %r)",
+                        getattr(layout_shape, "name", "<unnamed>"),
+                        layout_prompt_text,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to clear layout prompt text on shape '%s': %s",
+                        getattr(layout_shape, "name", "<unnamed>"),
+                        exc,
+                    )
+            return True
+    except Exception as exc:
+        logger.warning(f"Failed to clone layout shape: {exc}")
+    return False
+
+
+# Frontmatter keys that are handled explicitly or are metadata—not layout text fields.
+_RESERVED_FM_KEYS: frozenset[str] = frozenset({
+    "layout", "id", "title", "subtitle", "body", "background",
+    "images", "section_name", "_normalized_images", "marp", "theme",
+    "author", "date",
+})
+
+
+def apply_frontmatter_to_slide(
+    slide: "Slide",
+    data: SlideData,
+    config: Config,
+) -> None:
+    """Apply frontmatter-driven actions to a slide.
+
+    Handles semantic keys from the slide's ``frontmatter`` dict:
+
+    - **title** / **subtitle** / **body**: populated via typed
+      placeholders first; falls back to cloning matching TextBox shapes
+      from the layout (for templates that use free-form shapes).
+    - **background.image_path**: resolves the path relative to
+      :pyattr:`Config.assets_dir` and calls :func:`add_background_image`.
+    - **Other keys**: any remaining string-valued frontmatter key is
+      treated as a layout TextBox search term (underscores → spaces).
+      For example ``section_label: "Live Demo"`` will find a layout
+      shape whose text contains "section label" and clone it with the
+      provided value.
+
+    Args:
+        slide: PowerPoint slide object.
+        data: SlideData with populated ``frontmatter`` dict.
+        config: Configuration object (used for ``assets_dir``).
+    """
+    fm = data.frontmatter
+    if not fm:
+        return
+
+    slide_label = data.slide_id or data.title or data.layout_name
+
+    # --- background.image_path ---
+    bg = fm.get('background')
+    if isinstance(bg, dict):
+        bg_image_path = bg.get('image_path')
+        if bg_image_path:
+            resolved = Path(config.assets_dir) / bg_image_path
+            logger.info(f"  [{slide_label}] Applying background image: {resolved}")
+            add_background_image(slide, resolved)
+
+    # --- title ---
+    title_text = fm.get('title')
+    if title_text:
+        title_set = False
+        # Try typed placeholders first
+        for title_type in ["title", "center_title"]:
+            try:
+                result = resolve_placeholders(slide, {"title": title_type})
+                ph = result.get("title")
+                if ph:
+                    ph.text_frame.text = str(title_text)
+                    title_set = True
+                    logger.info(f"  [{slide_label}] Set title via placeholder ({title_type})")
+                    break
+            except PlaceholderNotFoundError:
+                continue
+
+        # Fallback: find a BODY placeholder whose layout shape name contains
+        # "title" (but not "feature_title" etc.) and populate it directly.
+        # This handles layouts where the title placeholder has BODY type
+        # instead of TITLE type (e.g. Feature Grid).
+        if not title_set:
+            for lph in slide.slide_layout.placeholders:
+                lname = getattr(lph, "name", "").lower()
+                if "title" in lname and "feature" not in lname:
+                    ph_idx = lph.placeholder_format.idx
+                    try:
+                        slide_ph = slide.placeholders[ph_idx]
+                        slide_ph.text_frame.text = str(title_text)
+                        title_set = True
+                        logger.info(
+                            "  [%s] Set title via BODY placeholder "
+                            "idx=%d (layout: '%s')",
+                            slide_label, ph_idx, lph.name,
+                        )
+                        break
+                    except (KeyError, AttributeError):
+                        pass
+
+        # Final fallback: clone layout TextBox matching "title"
+        if not title_set:
+            layout_shape = _find_layout_shape_by_prompt(slide, "title")
+            if layout_shape:
+                if _clone_layout_shape_with_text(slide, layout_shape, str(title_text)):
+                    title_set = True
+                    logger.info(f"  [{slide_label}] Set title via layout TextBox clone")
+            if not title_set:
+                logger.warning(f"  [{slide_label}] Could not find title shape")
+
+    # --- subtitle ---
+    subtitle_text = fm.get('subtitle')
+    if subtitle_text:
+        sub_set = False
+        # Try typed placeholder first
+        try:
+            result = resolve_placeholders(slide, {"subtitle": "subtitle"})
+            ph = result.get("subtitle")
+            if ph:
+                ph.text_frame.text = str(subtitle_text)
+                sub_set = True
+                logger.info(f"  [{slide_label}] Set subtitle via placeholder")
+        except PlaceholderNotFoundError:
+            pass
+
+        # Fallback: clone layout TextBox matching "subtitle" or "contact"
+        if not sub_set:
+            for kw in ("subtitle", "contact"):
+                layout_shape = _find_layout_shape_by_prompt(slide, kw)
+                if layout_shape:
+                    if _clone_layout_shape_with_text(slide, layout_shape, str(subtitle_text)):
+                        sub_set = True
+                        logger.info(f"  [{slide_label}] Set subtitle via layout TextBox clone ('{kw}')")
+                        break
+            if not sub_set:
+                logger.debug(f"  [{slide_label}] No subtitle shape found; skipping")
+
+    # --- body (from frontmatter only, markdown body handled by populate_slide) ---
+    body_text = fm.get('body')
+    if body_text and not data.content_blocks:
+        body_set = False
+        for body_type in ["body", "object"]:
+            try:
+                result = resolve_placeholders(slide, {"body": body_type})
+                ph = result.get("body")
+                if ph:
+                    ph.text_frame.text = str(body_text).strip()
+                    body_set = True
+                    logger.info(f"  [{slide_label}] Set body via placeholder ({body_type})")
+                    break
+            except PlaceholderNotFoundError:
+                continue
+
+        if not body_set:
+            layout_shape = _find_layout_shape_by_prompt(slide, "body")
+            if layout_shape:
+                if _clone_layout_shape_with_text(slide, layout_shape, str(body_text).strip()):
+                    body_set = True
+                    logger.info(f"  [{slide_label}] Set body via layout TextBox clone")
+
+    # --- Generic layout TextBox fields from remaining frontmatter keys ---
+    # Any string-valued key not already handled above is treated as a layout
+    # TextBox search term (underscores converted to spaces).  For example,
+    # ``section_label: "Live Demo"`` finds the layout shape whose text
+    # contains "section label" and clones it with the provided value.
+    for key, value in fm.items():
+        if key in _RESERVED_FM_KEYS or not isinstance(value, str):
+            continue
+        search_term = key.replace("_", " ")
+        layout_shape = _find_layout_shape_by_prompt(slide, search_term)
+        if layout_shape:
+            if _clone_layout_shape_with_text(slide, layout_shape, value):
+                logger.info(
+                    f"  [{slide_label}] Set '{key}' via layout TextBox clone"
+                )
+            else:
+                logger.warning(
+                    f"  [{slide_label}] Found layout shape for '{key}' but clone failed"
+                )
+        else:
+            logger.debug(
+                f"  [{slide_label}] No layout shape matching '{search_term}' for key '{key}'"
+            )
+
+
+def _clear_unused_layout_text(slide: "Slide") -> None:
+    """Clear text on layout TextBox shapes that were not populated.
+
+    After slide population, any layout TextBox shape whose text has not
+    been cloned to the slide will still render behind the slide content.
+    This function blanks out any remaining non-empty layout TextBox text
+    so that unpopulated prompt text (e.g. "SECTION LABEL", "Feature 1")
+    does not leak into the final presentation.
+
+    Shapes that were already handled during population are identified by
+    their ``_LAYOUT_PROMPT_TAG_PREFIX`` tag and skipped (they have
+    already been cleared by :func:`_clone_layout_shape_with_text`).
+
+    .. note::
+       Clearing layout shape text mutates the shared layout object, so
+       the change is visible to **all** subsequent slides using the same
+       layout.  This is acceptable because the generator either populates
+       a shape via frontmatter (in which case the layout text is already
+       cleared by the clone step) or the user intentionally left the
+       field undefined (in which case blank is the desired output).
+    """
+    for shape in slide.slide_layout.shapes:
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        text = shape.text_frame.text.strip()
+        if not text:
+            continue
+        # Skip shapes already handled (tagged during clone operations)
+        descr = _get_layout_shape_descr(shape)
+        if _LAYOUT_PROMPT_TAG_PREFIX in descr:
+            continue
+        # Cache original XML before clearing so that future slides sharing
+        # this layout can still clone with full formatting preserved.
+        from copy import deepcopy                         # noqa: E402 (local)
+        shape_key = _shape_cache_key(shape)
+        if shape_key not in _layout_shape_originals:
+            _layout_shape_originals[shape_key] = deepcopy(shape._element)
+        # Clear the remaining prompt text
+        try:
+            original_text = shape.text_frame.text
+            shape.text_frame.clear()
+            shape.text_frame.text = ""
+            logger.debug(
+                "Cleared unused layout text on shape '%s' (was %r)",
+                getattr(shape, "name", "<unnamed>"),
+                original_text,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to clear unused layout text on shape '%s': %s",
+                getattr(shape, "name", "<unnamed>"),
+                exc,
+            )
+
+
 def populate_slide(
     slide: "Slide",
     data: SlideData,
@@ -89,6 +583,9 @@ def populate_slide(
         >>> slide = build_slide("Title and Content", prs, registry)
         >>> populate_slide(slide, slide_data, config, registry)
     """
+    # Apply frontmatter-driven actions (background, subtitle, etc.)
+    apply_frontmatter_to_slide(slide, data, config)
+    
     # Handle images using PICTURE placeholders from the template
     if data.images:
         if registry is None:
@@ -99,14 +596,14 @@ def populate_slide(
         else:
             add_images_for_layout(data, slide, config, registry)
     
-    # Try to resolve placeholders with fallback for title type variations
-    # Title slides typically use CENTER_TITLE, content slides use TITLE
-    phs: dict = {}
+    # --- Title (only if NOT already set by apply_frontmatter_to_slide) ---
+    # Frontmatter-based title is handled in apply_frontmatter_to_slide.
+    # Here we handle title from content H1 (when no frontmatter title exists).
+    fm_has_title = data.frontmatter and data.frontmatter.get('title')
     title_ph = None
     content_ph = None
     
-    # Try to find title placeholder (TITLE or CENTER_TITLE)
-    if data.title:
+    if data.title and not fm_has_title:
         for title_type in ["title", "center_title"]:
             try:
                 result = resolve_placeholders(slide, {"title": title_type})
@@ -117,14 +614,72 @@ def populate_slide(
             except PlaceholderNotFoundError:
                 continue
         
+        # Fallback: clone layout TextBox for title
         if title_ph is None:
-            logger.warning(f"  No title placeholder found for slide '{data.layout_name}'")
+            layout_shape = _find_layout_shape_by_prompt(slide, "title")
+            if layout_shape:
+                _clone_layout_shape_with_text(slide, layout_shape, data.title)
+                logger.debug(f"  Set title via layout TextBox clone: '{data.title}'")
+            else:
+                logger.warning(f"  No title placeholder found for slide '{data.layout_name}'")
+        else:
+            title_ph.text_frame.text = data.title
+            logger.debug(f"  Set title: '{data.title}'")
     
-    # Try to find content placeholder (BODY, OBJECT, or SUBTITLE for title slides)
-    # Note: Some templates use OBJECT type for content placeholders instead of BODY
+    # --- Content blocks ---
     if data.content_blocks:
+        _multi_body_done = False
         for content_type in ["body", "object", "subtitle"]:
             try:
+                if content_type == "body":
+                    body_matches = get_placeholders(slide, ph_type="body")
+                    if len(body_matches) > 2:
+                        # Multi-BODY layout (e.g. Feature Grid with
+                        # ph_feature_title_1…6, ph_feature_desc_1…6):
+                        # populate slide placeholders directly by idx order
+                        # instead of cloning layout shapes.
+                        sorted_phs = sorted(
+                            body_matches,
+                            key=lambda ph: ph.placeholder_format.idx,
+                        )
+                        # Identify the title placeholder idx to exclude
+                        # from content distribution.
+                        title_idx = None
+                        if data.title:
+                            for lph in slide.slide_layout.placeholders:
+                                lname = getattr(lph, "name", "").lower()
+                                if "title" in lname and "feature" not in lname:
+                                    title_idx = lph.placeholder_format.idx
+                                    break
+                        content_phs = [
+                            ph for ph in sorted_phs
+                            if ph.placeholder_format.idx != title_idx
+                        ]
+                        for i, ph in enumerate(content_phs):
+                            if i < len(data.content_blocks):
+                                build_rich_content(
+                                    ph.text_frame,
+                                    [data.content_blocks[i]],
+                                    config,
+                                    data.layout_name,
+                                )
+                                logger.debug(
+                                    "  Multi-BODY: content_block[%d] → "
+                                    "placeholder idx=%d (%s)",
+                                    i, ph.placeholder_format.idx, ph.name,
+                                )
+                            else:
+                                ph.text_frame.clear()
+                                ph.text_frame.text = ""
+                        logger.debug(
+                            "  Multi-BODY: populated %d/%d placeholders "
+                            "with %d content blocks",
+                            min(len(content_phs), len(data.content_blocks)),
+                            len(content_phs),
+                            len(data.content_blocks),
+                        )
+                        _multi_body_done = True
+                        break
                 result = resolve_placeholders(slide, {"content": content_type})
                 content_ph = result.get("content")
                 if content_ph:
@@ -133,19 +688,50 @@ def populate_slide(
             except PlaceholderNotFoundError:
                 continue
         
-        if content_ph is None:
-            logger.warning(f"  No content placeholder found for slide '{data.layout_name}'")
-    
-    # Populate title if found
-    if title_ph and data.title:
-        title_ph.text_frame.text = data.title
-        logger.debug(f"  Set title: '{data.title}'")
-    
-    # Populate content if found
-    if content_ph and data.content_blocks:
-        text_frame = content_ph.text_frame
-        build_rich_content(text_frame, data.content_blocks, config, data.layout_name)
-        logger.debug(f"  Populated {len(data.content_blocks)} content blocks")
+        if _multi_body_done:
+            pass  # Content already distributed to individual placeholders
+        elif content_ph is None:
+            # Fallback: find layout TextBox shapes matching content keywords.
+            # Collect *all* matching shapes so that multi-shape layouts (e.g.
+            # 'Feature Grid' with ph_feature_desc_1 … ph_feature_desc_N) can
+            # each receive a portion of the content blocks.
+            content_shapes = _find_all_layout_shapes_by_keywords(
+                slide, _CONTENT_KEYWORDS,
+            )
+            if content_shapes:
+                n_shapes = len(content_shapes)
+                n_blocks = len(data.content_blocks)
+                # Distribute content blocks as evenly as possible across shapes.
+                base, extra = divmod(n_blocks, n_shapes)
+                idx = 0
+                for i, layout_shape in enumerate(content_shapes):
+                    count = base + (1 if i < extra else 0)
+                    block_slice = data.content_blocks[idx : idx + count]
+                    idx += count
+                    if not block_slice:
+                        continue
+                    if _clone_layout_shape_with_text(slide, layout_shape, ""):
+                        cloned = slide.shapes[-1] if slide.shapes else None
+                        if cloned and cloned.has_text_frame:
+                            build_rich_content(
+                                cloned.text_frame,
+                                block_slice,
+                                config,
+                                data.layout_name,
+                            )
+                            logger.debug(
+                                "  Set content via layout TextBox clone "
+                                "(shape %d/%d, %d blocks)",
+                                i + 1,
+                                n_shapes,
+                                len(block_slice),
+                            )
+            else:
+                logger.warning(f"  No content placeholder found for slide '{data.layout_name}'")
+        else:
+            text_frame = content_ph.text_frame
+            build_rich_content(text_frame, data.content_blocks, config, data.layout_name)
+            logger.debug(f"  Populated {len(data.content_blocks)} content blocks")
 
 
 def _normalize_layout_key(layout_name: str) -> str:

@@ -80,13 +80,11 @@ def load_layout_registry(template_path: Union[str, Path]) -> LayoutRegistry:
     # Note: prs.slide_layouts contains layouts from all masters, flattened
     for idx, layout in enumerate(prs.slide_layouts):
         layout_name = layout.name
-        
-        # Check if layout has placeholders (suitable for content)
-        if not _has_placeholders(layout):
-            logger.debug(
-                f"Skipping layout '{layout_name}' (index {idx}): no placeholders"
-            )
-            continue
+        placeholder_count = 0
+        try:
+            placeholder_count = len(layout.placeholders)
+        except (AttributeError, TypeError):
+            placeholder_count = 0
         
         # Check for duplicate names
         if layout_name in registry:
@@ -100,7 +98,7 @@ def load_layout_registry(template_path: Union[str, Path]) -> LayoutRegistry:
         registry[layout_name] = idx
         logger.debug(
             f"Registered layout '{layout_name}' at index {idx} "
-            f"({len(layout.placeholders)} placeholders)"
+            f"({placeholder_count} placeholders)"
         )
     
     logger.info(
