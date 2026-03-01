@@ -39,7 +39,9 @@ class SlideData:
         layout_name: Exact layout name from the template (required).
         title: Slide title, either from frontmatter or first H1.
         content_blocks: List of content blocks (paragraphs, bullet lists, etc.).
-        images: List of image paths specified in frontmatter or content.
+        images: List of image dicts, each with at minimum a 'src' key.
+            Optional keys include 'data-caption' (str) and 'class' (str).
+            Example: [{'src': 'photo.png', 'data-caption': 'A photo', 'class': 'rounded'}]
         section_name: Optional section marker for navigation.
         raw_content: Original markdown content after frontmatter removal.
         options: Additional options from frontmatter (image_fit, bg_image, etc.).
@@ -49,7 +51,7 @@ class SlideData:
     layout_name: str
     title: str | None = None
     content_blocks: list[str] = field(default_factory=list)
-    images: list[str] = field(default_factory=list)
+    images: list[dict[str, Any]] = field(default_factory=list)
     section_name: str = ""
     raw_content: str = ""
     options: dict[str, Any] = field(default_factory=dict)
@@ -475,14 +477,25 @@ def parse_slides(
         # Title priority: frontmatter > first H1 in content
         title = frontmatter.get('title') or title_from_content
         
-        # Extract images: normalized images from frontmatter + images in content
+        # Extract images: preserve full dicts (with 'src', 'data-caption', 'class', etc.)
+        # from _normalized_images so captions propagate to the image renderer.
         normalized_images = frontmatter.get('_normalized_images', [])
-        images = [img.get('src', '') for img in normalized_images if img.get('src')]
-        # Also keep raw frontmatter 'images' list for backward compat
+        images: list[dict[str, Any]] = [
+            img for img in normalized_images if img.get('src')
+        ]
+        # Fallback: use raw frontmatter 'images' list when no normalized data exists.
+        # Wrap bare strings as dicts for uniform downstream handling.
         raw_fm_images = frontmatter.get('images', [])
         if isinstance(raw_fm_images, list) and not normalized_images:
-            images = list(raw_fm_images)
-        images.extend(_extract_images_from_content(content))
+            images = [
+                ({'src': img} if isinstance(img, str) else img)
+                for img in raw_fm_images
+                if (img if isinstance(img, str) else img.get('src'))
+            ]
+        # Append images found inline in markdown/HTML content (always bare paths).
+        images.extend(
+            {'src': src} for src in _extract_images_from_content(content)
+        )
         
         # Derive content_blocks from frontmatter 'body' when markdown body is empty
         fm_body = frontmatter.get('body')

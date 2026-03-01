@@ -410,13 +410,20 @@ def add_images_for_layout(
     positions to place images. No external YAML configuration required -
     the template's embedded placeholders define all image placement areas.
     
+    Each entry in ``slide_data.images`` should be a dict with:
+        - ``src`` (str, required): relative path to the image file.
+        - ``data-caption`` (str, optional): caption text rendered below the image.
+        - ``class`` (str, optional): CSS-style class hint (e.g. ``'rounded'``).
+    Bare strings are also accepted for backward compatibility and will be
+    wrapped into ``{'src': <path>}`` dicts automatically.
+    
     Args:
-        slide_data: SlideData containing images list and layout_name
-        slide: PowerPoint slide object
-        config: Configuration object for assets_dir and image_styles
-        registry: LayoutRegistry (unused, kept for API compatibility)
-        base_path: Base path for resolving image paths (defaults to config.assets_dir)
-        fit_mode: 'contain' or 'cover' for image fitting
+        slide_data: SlideData containing images list and layout_name.
+        slide: PowerPoint slide object.
+        config: Configuration object for assets_dir and image_styles.
+        registry: LayoutRegistry (unused, kept for API compatibility).
+        base_path: Base path for resolving image paths (defaults to config.assets_dir).
+        fit_mode: 'contain' or 'cover' for image fitting.
     """
     if not slide_data.images:
         return
@@ -449,7 +456,19 @@ def add_images_for_layout(
     # Get per-image overrides from config
     per_image_src_config = config.get('image_styles.per_image_src', {}) or {}
     
-    # Place images into PICTURE placeholders
+    # Build a lookup from src -> normalized dict for caption fallback.
+    # If img_info in slide_data.images lacks 'data-caption', we can
+    # recover it from the original _normalized_images in frontmatter.
+    _normalized_by_src: Dict[str, Dict[str, Any]] = {}
+    for _ni in slide_data.frontmatter.get('_normalized_images', []):
+        _src = _ni.get('src')
+        if _src:
+            _normalized_by_src[_src] = _ni
+    
+    # Place images into PICTURE placeholders.
+    # Each img_info should be a dict with at least 'src'; may also carry
+    # 'data-caption' and 'class'.  For backward compatibility, bare
+    # strings are also accepted and wrapped into dicts on the fly.
     for i, img_info in enumerate(slide_data.images[:len(picture_phs)]):
         ph = picture_phs[i]
         
@@ -481,12 +500,22 @@ def add_images_for_layout(
         class_attr = img_info.get('class', '')
         caption = img_info.get('data-caption', '')
         
+        # Fallback: recover caption from _normalized_images if not on img_info
+        if not caption:
+            fallback = _normalized_by_src.get(img_src, {})
+            caption = fallback.get('data-caption', '')
+            if caption:
+                logging.debug(
+                    f"Recovered caption from _normalized_images for '{img_src}'"
+                )
+        
         logging.debug(
             f"Placing image into placeholder '{ph.name}' at "
             f"({left:.2f}\", {top:.2f}\") size {width:.2f}\" x {height:.2f}\""
         )
         
         if caption:
+            logging.info(f"Adding image caption: {caption}")
             add_image_with_caption(
                 slide, img_path, left, top, width, height,
                 caption=caption, fit_mode=fit_mode, class_attr=class_attr,
