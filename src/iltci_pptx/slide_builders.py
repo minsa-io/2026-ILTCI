@@ -1004,8 +1004,12 @@ def _add_content_line(
             para.space_after = Pt(space_after_pt)
     
     def _apply_template_font(run) -> None:
-        """Apply template-derived font defaults (name, color) to a run."""
-        if font_name is not None:
+        """Apply template-derived font defaults (name, color) to a run.
+
+        Skips font-name override when the run already carries an explicit
+        font (e.g. 'Consolas' set by inline-code formatting in rich_text).
+        """
+        if font_name is not None and run.font.name is None:
             run.font.name = font_name
         if font_color is not None:
             run.font.color.rgb = font_color

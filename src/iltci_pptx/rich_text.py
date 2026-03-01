@@ -90,7 +90,8 @@ def add_numbering(paragraph: '_Paragraph', start_at: int = 1, numbering_type: st
 def add_formatted_text(paragraph: '_Paragraph', text: str) -> None:
     """Add text to a paragraph with markdown formatting support.
     
-    Supports **bold**, *italic*, ***bold+italic***, and [text](url) markdown syntax.
+    Supports **bold**, *italic*, ***bold+italic***, `inline code`,
+    and [text](url) markdown syntax.
     
     Args:
         paragraph: PowerPoint paragraph object
@@ -99,9 +100,9 @@ def add_formatted_text(paragraph: '_Paragraph', text: str) -> None:
     # Clear any existing text
     paragraph.text = ""
     
-    # Pattern to match markdown formatting including links
-    # Matches [text](url) links, ***text*** (bold+italic), **text** (bold), or *text* (italic)
-    pattern = r'(\[.*?\]\(.*?\)|\*\*\*.*?\*\*\*|\*\*.*?\*\*|\*.*?\*)'
+    # Pattern to match markdown formatting including links and inline code
+    # Order matters: check links first, then bold+italic, bold, italic, inline code
+    pattern = r'(\[.*?\]\(.*?\)|\*\*\*.*?\*\*\*|\*\*.*?\*\*|\*.*?\*|`[^`]+`)'
     
     # Split text by markdown patterns
     parts = re.split(pattern, text)
@@ -140,6 +141,18 @@ def add_formatted_text(paragraph: '_Paragraph', text: str) -> None:
             run = paragraph.add_run()
             run.text = part[1:-1]
             run.font.italic = True
+        elif part.startswith('`') and part.endswith('`'):
+            # Inline code - render with monospace font and off-white highlight
+            run = paragraph.add_run()
+            run.text = part[1:-1]
+            run.font.name = 'Consolas'
+            # Add off-white background highlight via XML
+            rPr = run._r.get_or_add_rPr()
+            highlight = OxmlElement('a:highlight')
+            srgbClr = OxmlElement('a:srgbClr')
+            srgbClr.set('val', 'F0F0F0')
+            highlight.append(srgbClr)
+            rPr.append(highlight)
         else:
             # Regular text
             run = paragraph.add_run()
