@@ -18,6 +18,7 @@ from typing import Optional
 from .config import Config
 from .layout_discovery import load_layout_registry, LayoutRegistry, get_available_layout_names
 from .markdown_parser import parse_markdown_file, parse_markdown_slides, SlideData
+from .images import fix_layout_picture_aspect_ratios
 from .slide_builders import build_slide, populate_slide
 
 logger = logging.getLogger(__name__)
@@ -69,10 +70,15 @@ class PresentationGenerator:
             style_overrides: Optional dict of style overrides to apply to slides.
         """
         # Validate paths exist
-        self.config.validate_paths()
+        self.config.validate_paths(
+            exclude=['template'] if template_override else None
+        )
         
         # Determine template path (may be overridden or set via frontmatter later)
         template_path = template_override or self.config.template_path
+        logger.debug(f"Resolved config template path: {self.config.template_path}")
+        if template_override:
+            logger.debug(f"Template override provided: {template_override}")
         
         # Load layout registry from template (for validation and building)
         logger.info(f"Discovering layouts from template: {template_path}")
@@ -115,7 +121,13 @@ class PresentationGenerator:
         # config template for consistent behavior.
         if 'template' in doc_frontmatter and not template_override:
             new_template = self.config.project_root / doc_frontmatter['template']
-            if new_template != template_path:
+            logger.debug(f"Frontmatter template resolved to: {new_template}")
+            if not new_template.exists():
+                logger.warning(
+                    "Frontmatter template not found; keeping config template. "
+                    f"Missing: {new_template}"
+                )
+            elif new_template != template_path:
                 logger.info(f"Template in frontmatter: {new_template}")
                 # Verify the new template has compatible layouts
                 new_registry = load_layout_registry(new_template)
@@ -138,6 +150,9 @@ class PresentationGenerator:
         logger.info(f"Template has {len(prs.slide_layouts)} total layouts")
         logger.info(f"Template has {len(prs.slides)} existing slides")
         
+        # Fix stretched non-placeholder pictures on layouts (e.g. logos)
+        fix_layout_picture_aspect_ratios(prs)
+        
         # Remove existing content slides
         logger.info("Removing existing slides from template...")
         while len(prs.slides) > 0:
@@ -149,11 +164,15 @@ class PresentationGenerator:
         
         # Build and populate slides using generic pipeline
         for idx, data in enumerate(slide_data_list):
-            logger.info(f"\n=== Slide {idx + 1}: {data.layout_name} ===")
+            id_label = f" (id={data.slide_id})" if data.slide_id else ""
+            logger.info(f"\n=== Slide {idx + 1}: {data.layout_name}{id_label} ===")
             if data.title:
                 logger.info(f"  Title: {data.title[:60]}{'...' if len(data.title) > 60 else ''}")
             if data.images:
                 logger.info(f"  Images: {len(data.images)}")
+            if data.frontmatter:
+                fm_keys = [k for k in data.frontmatter if k != '_normalized_images']
+                logger.debug(f"  Frontmatter keys: {fm_keys}")
             
             try:
                 # Build slide using layout from registry

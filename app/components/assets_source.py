@@ -161,7 +161,7 @@ def render_assets_source_section(base_config: dict[str, Any]) -> str:
         base_config: Base configuration dictionary
         
     Returns:
-        The selected assets source ("Default" or "Upload custom assets")
+        The selected assets source ("None", "Default", or "Upload custom assets")
     """
     st.subheader("🖼️ Assets Source")
     
@@ -170,7 +170,8 @@ def render_assets_source_section(base_config: dict[str, Any]) -> str:
     with col_a1:
         assets_source = st.radio(
             "Select assets source:",
-            ["Default", "Upload custom assets"],
+            ["None", "Default", "Upload custom assets"],
+            index=1,
             horizontal=True,
             key=SessionKeys.ASSETS_SOURCE
         )
@@ -200,11 +201,16 @@ def render_assets_source_section(base_config: dict[str, Any]) -> str:
             clear_upload_widget_state()
             st.success("✅ Assets cleared successfully!")
             st.rerun()
-    else:
+    elif assets_source == "Default":
         set_state_value(SessionKeys.CUSTOM_ASSETS_DIR, None)
         with col_a2:
             default_assets = get_paths_config().get('assets_dir', 'assets/')
             st.info(f"Using default: `{default_assets}`")
+    else:
+        # "None" - no assets
+        set_state_value(SessionKeys.CUSTOM_ASSETS_DIR, None)
+        with col_a2:
+            st.info("No assets directory will be used")
     
     st.divider()
     

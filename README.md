@@ -36,7 +36,7 @@ The generator parses Markdown files with YAML frontmatter per slide, maps conten
 ## Directory Structure
 
 ```
-2026 ILTCI/
+PPTX_Generator/
 ├── app/                              # Streamlit UI application
 │   ├── app.py                        # Streamlit app entrypoint
 │   ├── bootstrap.py                  # App initialization and page config
@@ -81,6 +81,7 @@ The generator parses Markdown files with YAML frontmatter per slide, maps conten
 │   └── slides.md                     # Presentation slide content
 ├── assets/                           # Static resources (images for slides)
 │   └── *.png                         # Slide images
+├── output/                            # (Generated) output PPTX files (typically gitignored)
 ├── pyproject.toml                    # Project configuration and dependencies
 ├── uv.lock                           # Locked dependencies (uv)
 ├── CONTRIBUTING.md                   # Contribution guidelines
@@ -101,7 +102,7 @@ The generator parses Markdown files with YAML frontmatter per slide, maps conten
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd "2026 ILTCI"
+cd PPTX_Generator
 
 # Option 1: Using uv (recommended)
 uv sync
@@ -111,8 +112,6 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
 ```
-
-For detailed installation instructions, see [`docs/INSTALLATION.md`](docs/INSTALLATION.md).
 
 ## Quick Start
 
@@ -144,10 +143,10 @@ See [`app/README.md`](app/README.md) for full app documentation.
 uv run python src/generate_pptx.py --help
 ```
 
-**Generate a presentation (using defaults from config):**
+**Generate a presentation (recommended — use this repo’s config):**
 
 ```bash
-uv run python src/generate_pptx.py
+uv run python src/generate_pptx.py --config configs/config.yaml
 ```
 
 **With custom options:**
@@ -165,11 +164,15 @@ uv run python src/generate_pptx.py \
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--config` | Path to configuration YAML | `app/config.yaml` |
+| `--config` | Path to configuration YAML | `app/config.yaml` *(CLI default; this repo ships `configs/config.yaml`)* |
 | `--template` | Path to PowerPoint template (overrides config) | — |
 | `--content` | Path to Markdown content file (overrides config) | — |
 | `--output` | Output PPTX file path (overrides config) | — |
 | `--assets-dir` | Path to assets directory (overrides config) | — |
+
+Notes:
+- The CLI’s default `--config` value is currently `app/config.yaml`, but this repository’s configuration file is located at [`configs/config.yaml`](configs/config.yaml). Use `--config configs/config.yaml` unless you have created your own config elsewhere.
+- Flags like `--template`/`--content`/`--output`/`--assets-dir` are applied by mutating the loaded config at runtime (see [`src/iltci_pptx/cli.py`](src/iltci_pptx/cli.py)).
 
 ## Markdown Content Format
 
@@ -289,7 +292,7 @@ ui:
     use_temp_output: true
   advanced:
     show_template_paths: false
-  style_overrides_mode: "default"
+  style_overrides_mode: "Default"
 ```
 
 Paths are resolved relative to `project_root` (which is itself relative to the config file's directory).
@@ -405,4 +408,4 @@ This project is part of the 2026 ILTCI presentation materials.
 
 ---
 
-**Last Updated**: February 10, 2026
+**Last Updated**: March 2, 2026
