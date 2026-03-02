@@ -75,10 +75,12 @@ class PresentationGenerator:
         )
         
         # Determine template path (may be overridden or set via frontmatter later)
-        template_path = template_override or self.config.template_path
-        logger.debug(f"Resolved config template path: {self.config.template_path}")
         if template_override:
+            template_path = template_override
             logger.debug(f"Template override provided: {template_override}")
+        else:
+            template_path = self.config.template_path
+            logger.debug(f"Resolved config template path: {template_path}")
         
         # Load layout registry from template (for validation and building)
         logger.info(f"Discovering layouts from template: {template_path}")
